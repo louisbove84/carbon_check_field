@@ -46,6 +46,12 @@ app.*.map.json
 # IMPORTANT: Never commit service account credentials!
 assets/service-account.json
 
+# Environment variables with API keys and secrets
+.env
+.env.local
+.env.*.local
+config/
+
 # API keys (replace with actual keys before building)
 android/app/src/main/AndroidManifest.xml
 ios/Runner/Info.plist
