@@ -1,0 +1,16 @@
+
+# FastAPI framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+
+# Google Cloud SDKs
+earthengine-api==0.1.384
+google-cloud-aiplatform==1.38.1
+google-auth==2.27.0
+
+# Data processing
+pydantic==2.5.3
+
+# ASGI server
+gunicorn==21.2.0
+

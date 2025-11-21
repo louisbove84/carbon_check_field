@@ -5,68 +5,19 @@
 
 class AppConstants {
   // ============================================================
-  // API ENDPOINTS
+  // BACKEND API CONFIGURATION
   // ============================================================
   
-  /// Vertex AI model endpoint for crop prediction
-  static const String vertexAiEndpoint =
-      'https://us-central1-aiplatform.googleapis.com/v1/projects/ml-pipeline-477612/locations/us-central1/endpoints/7591968360607252480:predict';
+  /// Secure Cloud Run backend URL
+  /// TODO: Update this after deploying backend to Cloud Run
+  static const String backendApiUrl = 
+      'https://carboncheck-field-api-XXXXXXXX-uc.a.run.app';
   
-  /// Earth Engine REST API base URL
-  static const String earthEngineBaseUrl =
-      'https://earthengine.googleapis.com/v1';
+  /// API request timeout (seconds)
+  static const int apiTimeout = 60;
   
-  /// Google Cloud project ID for Earth Engine
-  static const String gcpProjectId = 'ml-pipeline-477612';
-  
-  /// OAuth2 token endpoint for service account
-  static const String oauth2TokenUrl =
-      'https://oauth2.googleapis.com/token';
-
-  // ============================================================
-  // EARTH ENGINE CONFIGURATION
-  // ============================================================
-  
-  /// Sentinel-2 Surface Reflectance Harmonized collection
-  static const String sentinel2Collection = 'COPERNICUS/S2_SR_HARMONIZED';
-  
-  /// Year to query for NDVI data
-  static const int dataYear = 2024;
-  
-  /// Date range for analysis (full year)
-  static const String startDate = '2024-01-01';
-  static const String endDate = '2024-12-31';
-  
-  /// Cloud cover threshold (percentage)
-  static const int maxCloudCover = 20;
-
-  // ============================================================
-  // MODEL FEATURE CONFIGURATION
-  // ============================================================
-  
-  /// Number of features expected by the ML model
-  static const int numFeatures = 17;
-  
-  /// Feature names in the exact order required by Vertex AI
-  static const List<String> featureNames = [
-    'ndvi_mean',
-    'ndvi_std',
-    'ndvi_min',
-    'ndvi_max',
-    'ndvi_p25',
-    'ndvi_p50',
-    'ndvi_p75',
-    'ndvi_early',
-    'ndvi_late',
-    'elevation_m',
-    'longitude',
-    'latitude',
-    'ndvi_range',
-    'ndvi_iqr',
-    'ndvi_change',
-    'ndvi_early_ratio',
-    'ndvi_late_ratio',
-  ];
+  /// Maximum retry attempts for failed requests
+  static const int maxRetries = 3;
 
   // ============================================================
   // CARBON CREDIT RATES ($/acre/year)
@@ -126,13 +77,16 @@ class AppConstants {
       'Network error. Please check your internet connection.';
   
   static const String errorAuthFailure =
-      'Authentication failed. Please check service account credentials.';
+      'Authentication failed. Please restart the app.';
   
   static const String errorInvalidPolygon =
       'Invalid field boundary. Please draw at least 3 points.';
   
-  static const String errorPredictionFailed =
-      'Crop prediction failed. Please try again.';
+  static const String errorAnalysisFailed =
+      'Field analysis failed. Please try again.';
+  
+  static const String errorBackendUnavailable =
+      'Backend service unavailable. Please try again later.';
 }
 
 /// Carbon credit rate range for a specific crop

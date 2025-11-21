@@ -1,0 +1,177 @@
+/// Backend API service for secure communication with Cloud Run
+/// 
+/// Handles all communication with the secure backend API:
+/// - Firebase Auth token management
+/// - Field analysis requests
+/// - Error handling and retries
+
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:carbon_check_field/models/field_data.dart';
+import 'package:carbon_check_field/models/prediction_result.dart';
+
+class BackendService {
+  /// Cloud Run backend URL
+  /// TODO: Update this after deploying to Cloud Run
+  static const String backendUrl = 'https://carboncheck-field-api-XXXXXXXX-uc.a.run.app';
+  
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  
+  /// Maximum number of retry attempts
+  static const int maxRetries = 3;
+  
+  /// Delay between retries (in seconds)
+  static const int retryDelay = 2;
+
+  /// Get Firebase ID token for authentication
+  Future<String> _getIdToken() async {
+    try {
+      final user = _auth.currentUser;
+      
+      if (user == null) {
+        // Sign in anonymously if not already signed in
+        await _auth.signInAnonymously();
+      }
+      
+      // Get ID token
+      final idToken = await _auth.currentUser?.getIdToken();
+      
+      if (idToken == null) {
+        throw Exception('Failed to get Firebase ID token');
+      }
+      
+      return idToken;
+    } catch (e) {
+      throw Exception('Firebase authentication failed: $e');
+    }
+  }
+
+  /// Analyze a field by sending polygon to backend API
+  /// 
+  /// Returns PredictionResult with crop type, confidence, and CO₂ income
+  Future<PredictionResult> analyzeField(FieldData field, {int? year}) async {
+    try {
+      // Get authentication token
+      final idToken = await _getIdToken();
+      
+      // Build request body
+      final requestBody = {
+        'polygon': field.polygonPoints
+            .map((p) => {'lat': p.latitude, 'lng': p.longitude})
+            .toList(),
+        'year': year ?? DateTime.now().year,
+      };
+      
+      // Make API call with retry logic
+      final response = await _makeRequestWithRetry(
+        '/analyze',
+        requestBody,
+        idToken,
+      );
+      
+      // Parse response
+      return _parseAnalysisResponse(response, field.areaAcres);
+      
+    } catch (e) {
+      throw Exception('Field analysis failed: $e');
+    }
+  }
+
+  /// Make HTTP request with automatic retry logic
+  Future<Map<String, dynamic>> _makeRequestWithRetry(
+    String endpoint,
+    Map<String, dynamic> body,
+    String idToken,
+  ) async {
+    int attempts = 0;
+    Exception? lastException;
+    
+    while (attempts < maxRetries) {
+      attempts++;
+      
+      try {
+        final url = Uri.parse('$backendUrl$endpoint');
+        
+        final response = await http.post(
+          url,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $idToken',
+          },
+          body: json.encode(body),
+        ).timeout(
+          const Duration(seconds: 60),
+        );
+        
+        if (response.statusCode == 200) {
+          return json.decode(response.body) as Map<String, dynamic>;
+        } else if (response.statusCode == 401) {
+          throw Exception('Authentication failed. Please restart the app.');
+        } else if (response.statusCode >= 500 && attempts < maxRetries) {
+          // Server error - retry
+          lastException = Exception('Server error (${response.statusCode}). Retrying...');
+          await Future.delayed(Duration(seconds: retryDelay * attempts));
+          continue;
+        } else {
+          throw Exception('API error (${response.statusCode}): ${response.body}');
+        }
+      } on http.ClientException catch (e) {
+        lastException = Exception('Network error: $e');
+        if (attempts < maxRetries) {
+          await Future.delayed(Duration(seconds: retryDelay * attempts));
+          continue;
+        }
+      } catch (e) {
+        lastException = Exception('Request failed: $e');
+        if (attempts < maxRetries) {
+          await Future.delayed(Duration(seconds: retryDelay * attempts));
+          continue;
+        }
+      }
+    }
+    
+    throw lastException ?? Exception('Request failed after $maxRetries attempts');
+  }
+
+  /// Parse analysis response from backend
+  PredictionResult _parseAnalysisResponse(
+    Map<String, dynamic> response,
+    double areaAcres,
+  ) {
+    try {
+      return PredictionResult(
+        cropType: response['crop'] as String,
+        confidence: (response['confidence'] as num).toDouble(),
+        areaAcres: areaAcres,
+        carbonIncomeMin: (response['co2_income_min'] as num).toDouble(),
+        carbonIncomeMax: (response['co2_income_max'] as num).toDouble(),
+        carbonIncomeAverage: (response['co2_income_avg'] as num).toDouble(),
+        predictedAt: DateTime.now(),
+      );
+    } catch (e) {
+      throw Exception('Failed to parse analysis response: $e');
+    }
+  }
+
+  /// Test connection to backend API
+  Future<bool> testConnection() async {
+    try {
+      final url = Uri.parse('$backendUrl/health');
+      
+      final response = await http.get(url).timeout(
+        const Duration(seconds: 10),
+      );
+      
+      return response.statusCode == 200;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// Sign out (if needed for debugging)
+  Future<void> signOut() async {
+    await _auth.signOut();
+  }
+}
+

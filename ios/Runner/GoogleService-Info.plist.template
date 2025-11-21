@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- 
+		Firebase Configuration for iOS
+		
+		1. Go to Firebase Console: https://console.firebase.google.com
+		2. Select project: ml-pipeline-477612
+		3. Add iOS app with Bundle ID: com.carboncheck.field
+		4. Download GoogleService-Info.plist
+		5. Replace this template file with the downloaded file
+	-->
+	<key>CLIENT_ID</key>
+	<string>YOUR_CLIENT_ID_HERE</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>YOUR_REVERSED_CLIENT_ID_HERE</string>
+	<key>API_KEY</key>
+	<string>YOUR_IOS_API_KEY_HERE</string>
+	<key>GCM_SENDER_ID</key>
+	<string>YOUR_SENDER_ID_HERE</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.carboncheck.field</string>
+	<key>PROJECT_ID</key>
+	<string>ml-pipeline-477612</string>
+	<key>STORAGE_BUCKET</key>
+	<string>ml-pipeline-477612.appspot.com</string>
+	<key>IS_ADS_ENABLED</key>
+	<false/>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false/>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true/>
+	<key>IS_GCM_ENABLED</key>
+	<true/>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true/>
+	<key>GOOGLE_APP_ID</key>
+	<string>YOUR_GOOGLE_APP_ID_HERE</string>
+</dict>
+</plist>
+

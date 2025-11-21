@@ -16,8 +16,12 @@ dependencies:
   # Google Maps for field drawing
   google_maps_flutter: ^2.5.0
   
-  # HTTP requests for Earth Engine & Vertex AI
+  # HTTP requests for backend API
   http: ^1.1.0
+  
+  # Firebase Authentication (anonymous login)
+  firebase_core: ^2.24.2
+  firebase_auth: ^4.16.0
   
   # Geospatial calculations (area, distance)
   latlong2: ^0.9.0
@@ -27,9 +31,6 @@ dependencies:
   
   # State management
   provider: ^6.1.1
-  
-  # Secure storage for service account credentials
-  flutter_secure_storage: ^9.0.0
   
   # JSON parsing
   json_annotation: ^4.8.1

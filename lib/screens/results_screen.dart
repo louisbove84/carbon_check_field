@@ -8,9 +8,8 @@
 import 'package:flutter/material.dart';
 import 'package:carbon_check_field/models/field_data.dart';
 import 'package:carbon_check_field/models/prediction_result.dart';
-import 'package:carbon_check_field/services/auth_service.dart';
-import 'package:carbon_check_field/services/earth_engine_service.dart';
-import 'package:carbon_check_field/services/vertex_ai_service.dart';
+import 'package:carbon_check_field/services/backend_service.dart';
+import 'package:carbon_check_field/services/firebase_service.dart';
 import 'package:carbon_check_field/widgets/loading_overlay.dart';
 import 'package:carbon_check_field/widgets/result_card.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
@@ -29,10 +28,8 @@ class ResultsScreen extends StatefulWidget {
 }
 
 class _ResultsScreenState extends State<ResultsScreen> {
-  // Services
-  late final AuthService _authService;
-  late final EarthEngineService _eeService;
-  late final VertexAiService _vertexService;
+  // Backend service (secure - no keys in app!)
+  late final BackendService _backendService;
   
   // State
   bool _isLoading = true;
@@ -44,40 +41,33 @@ class _ResultsScreenState extends State<ResultsScreen> {
   void initState() {
     super.initState();
     
-    // Initialize services
-    _authService = AuthService();
-    _eeService = EarthEngineService(_authService);
-    _vertexService = VertexAiService(_authService);
+    // Initialize backend service (secure - uses Firebase Auth!)
+    _backendService = BackendService();
     
     // Start analysis pipeline
     _runAnalysis();
   }
 
-  /// Run the full analysis pipeline
+  /// Run the full analysis pipeline via secure backend
   Future<void> _runAnalysis() async {
     try {
-      // Step 1: Initialize authentication
+      // Step 1: Ensure Firebase is initialized
       setState(() {
-        _loadingMessage = 'Authenticating with Google Cloud...';
+        _loadingMessage = 'Connecting securely...';
       });
-      await _authService.initialize();
       
-      // Step 2: Compute NDVI features from Earth Engine
+      if (!FirebaseService.isSignedIn()) {
+        await FirebaseService.signInAnonymously();
+      }
+      
+      // Step 2: Send field to backend for analysis
       setState(() {
-        _loadingMessage = 'Analyzing satellite imagery (2024)...';
+        _loadingMessage = 'Analyzing satellite imagery (2024)...\nThis may take 10-30 seconds.';
       });
-      final features = await _eeService.computeFeatures(widget.fieldData);
       
-      // Update field data with computed features
-      final fieldWithFeatures = widget.fieldData.copyWith(features: features);
+      final result = await _backendService.analyzeField(widget.fieldData);
       
-      // Step 3: Get crop prediction from Vertex AI
-      setState(() {
-        _loadingMessage = 'Running crop classification model...';
-      });
-      final result = await _vertexService.predictCropType(fieldWithFeatures);
-      
-      // Step 4: Display results
+      // Step 3: Display results
       setState(() {
         _isLoading = false;
         _result = result;

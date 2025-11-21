@@ -2,6 +2,10 @@
 
 A beautiful Flutter mobile app for farmers to analyze crop types and estimate carbon credit income by drawing field boundaries on a satellite map.
 
+## 🔒 100% Secure Architecture
+
+**No service account keys in the app!** Uses Firebase Auth + secure Cloud Run backend.
+
 ## Features
 
 ✨ **Interactive Field Drawing**  
@@ -11,18 +15,26 @@ A beautiful Flutter mobile app for farmers to analyze crop types and estimate ca
 
 🛰️ **Satellite Analysis**  
 - Queries Sentinel-2 SR Harmonized imagery (2024)
-- Computes 17 NDVI-based features via Earth Engine REST API
+- Computes 17 NDVI-based features via Earth Engine
 - Handles temporal analysis (early season vs late season)
+- **Secure:** All processing happens on backend, not in app
 
 🤖 **AI Crop Classification**  
 - Deployed Vertex AI model endpoint
 - Predicts crop type with confidence score
 - Supports: Corn, Soybeans, Alfalfa, Winter Wheat
+- **Secure:** API calls from backend with Application Default Credentials
 
 💰 **Carbon Credit Estimates**  
 - Real-world 2025 rates from Indigo Ag & Truterra
 - Shows income range and average per year
 - Shareable results card
+
+🔐 **Security First**  
+- Firebase Authentication (anonymous login)
+- Secure Cloud Run backend
+- No credentials stored in mobile app
+- HTTPS encryption everywhere
 
 ## Architecture
 

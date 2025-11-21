@@ -43,16 +43,21 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-# IMPORTANT: Never commit service account credentials!
+# IMPORTANT: Never commit credentials or API keys!
+# Old architecture files (no longer used)
 assets/service-account.json
 
-# Environment variables with API keys and secrets
+# Environment variables with API keys
 .env
 .env.local
 .env.*.local
 config/
 
-# API keys (replace with actual keys before building)
+# Firebase configuration files (download from Firebase Console)
+ios/Runner/GoogleService-Info.plist
+android/app/google-services.json
+
+# Platform files with Google Maps API keys
 android/app/src/main/AndroidManifest.xml
 ios/Runner/Info.plist
 
