@@ -13,8 +13,7 @@ import 'package:carbon_check_field/models/prediction_result.dart';
 
 class BackendService {
   /// Cloud Run backend URL
-  /// TODO: Update this after deploying to Cloud Run
-  static const String backendUrl = 'https://carboncheck-field-api-XXXXXXXX-uc.a.run.app';
+  static const String backendUrl = 'https://carboncheck-field-api-6by67xpgga-uc.a.run.app';
   
   final FirebaseAuth _auth = FirebaseAuth.instance;
   
