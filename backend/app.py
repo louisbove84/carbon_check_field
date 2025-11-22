@@ -51,10 +51,11 @@ except Exception as e:
     print("ℹ️ Will attempt to initialize on first request")
 
 # Configuration
-GCP_PROJECT_ID = "ml-pipeline-477612"
+GCP_PROJECT_ID = "ml-pipeline-477612"  # Vertex AI is in this project
+FIREBASE_PROJECT_ID = "carbon-check-field"  # Firebase Auth is in this project
 VERTEX_AI_ENDPOINT = (
     "projects/ml-pipeline-477612/locations/us-central1/"
-    "endpoints/7591968360607252480"
+    "endpoints/447851976714092544"  # crop-endpoint-1763716420
 )
 SENTINEL2_COLLECTION = "COPERNICUS/S2_SR_HARMONIZED"
 
@@ -88,6 +89,8 @@ class AnalyzeFieldResponse(BaseModel):
     """Analysis results with crop prediction and CO₂ income"""
     crop: str
     confidence: float
+    cdl_crop: Optional[str] = None  # CDL ground truth crop type
+    cdl_agreement: bool = False  # Whether model and CDL agree
     area_acres: float
     co2_income_min: float
     co2_income_max: float
@@ -120,7 +123,7 @@ async def verify_firebase_token(authorization: str = Header(None)) -> dict:
         decoded_token = id_token.verify_firebase_token(
             token, 
             requests.Request(),
-            audience=GCP_PROJECT_ID
+            audience=FIREBASE_PROJECT_ID
         )
         
         return decoded_token
@@ -170,6 +173,67 @@ def calculate_polygon_area_acres(coords: List[Tuple[float, float]]) -> float:
     
     # Convert square meters to acres
     return area * 0.000247105
+
+
+# CDL Crop Code Mapping (USDA Cropland Data Layer)
+CDL_CROP_MAPPING = {
+    1: "Corn",
+    5: "Soybeans",
+    36: "Alfalfa",
+    24: "Winter Wheat",
+    23: "Spring Wheat",
+    4: "Sorghum",
+    28: "Oats",
+    # Add more as needed
+}
+
+# ============================================================================
+# EARTH ENGINE - CDL CROP TYPE LOOKUP
+# ============================================================================
+
+def get_cdl_crop_type(polygon_coords: List[Tuple[float, float]], year: int) -> Optional[str]:
+    """
+    Get the dominant crop type from USDA Cropland Data Layer (CDL).
+    
+    Args:
+        polygon_coords: List of (lng, lat) tuples
+        year: Year for CDL data (e.g., 2024)
+    
+    Returns:
+        Crop name from CDL or None if unavailable
+    """
+    try:
+        # Ensure Earth Engine is initialized
+        if not ee.data._initialized:
+            ee.Initialize()
+        
+        # Create polygon
+        ee_polygon = ee.Geometry.Polygon([polygon_coords])
+        
+        # Load CDL dataset for the year
+        # CDL is available from 2008-2023 (2024 may not be available yet)
+        cdl_year = min(year, 2023)  # Use latest available
+        cdl = ee.Image(f'USDA/NASS/CDL/{cdl_year}').select('cropland')
+        
+        # Get the most common crop type in the polygon
+        stats = cdl.reduceRegion(
+            reducer=ee.Reducer.mode(),  # Most common value
+            geometry=ee_polygon,
+            scale=30,
+            maxPixels=1e9
+        ).getInfo()
+        
+        crop_code = stats.get('cropland')
+        
+        if crop_code:
+            crop_name = CDL_CROP_MAPPING.get(int(crop_code), f"Crop Code {crop_code}")
+            return crop_name
+        
+        return None
+    
+    except Exception as e:
+        print(f"Warning: CDL lookup failed: {e}")
+        return None  # Don't fail the whole request if CDL unavailable
 
 
 # ============================================================================
@@ -476,6 +540,18 @@ async def analyze_field(
         print("Predicting crop type...")
         crop, confidence = predict_crop_type(features)
         
+        # Get CDL ground truth crop type
+        print("Fetching CDL ground truth...")
+        cdl_crop = get_cdl_crop_type(coords, request.year)
+        
+        # Check if model and CDL agree
+        cdl_agreement = False
+        if cdl_crop:
+            # Normalize crop names for comparison (handle variations)
+            crop_normalized = crop.lower().replace(" ", "")
+            cdl_normalized = cdl_crop.lower().replace(" ", "")
+            cdl_agreement = crop_normalized == cdl_normalized
+        
         # Calculate carbon income
         income = calculate_carbon_income(crop, area_acres)
         
@@ -483,6 +559,8 @@ async def analyze_field(
         response = AnalyzeFieldResponse(
             crop=crop,
             confidence=confidence,
+            cdl_crop=cdl_crop,
+            cdl_agreement=cdl_agreement,
             area_acres=round(area_acres, 2),
             co2_income_min=round(income["min"], 2),
             co2_income_max=round(income["max"], 2),
@@ -491,7 +569,9 @@ async def analyze_field(
             timestamp=datetime.utcnow().isoformat()
         )
         
-        print(f"✅ Analysis complete: {crop} ({confidence:.0%}), ${income['avg']:.0f}/year")
+        cdl_status = f"CDL: {cdl_crop}" if cdl_crop else "CDL: N/A"
+        agreement_icon = "✅" if cdl_agreement else "⚠️"
+        print(f"{agreement_icon} Analysis complete: Model={crop} ({confidence:.0%}), {cdl_status}, ${income['avg']:.0f}/year")
         
         return response
     

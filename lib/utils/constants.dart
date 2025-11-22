@@ -5,8 +5,12 @@
 
 class AppConstants {
   // ============================================================
-  // BACKEND API CONFIGURATION
+  // API KEYS & BACKEND CONFIGURATION
   // ============================================================
+  
+  /// Google Maps API key (for geocoding and maps)
+  /// NOTE: In production, this should be in environment variables
+  static const String googleMapsApiKey = 'AIzaSyCAf6KxL_60PsKZlVyBLBPIyD6Rs8df0GA';
   
   /// Secure Cloud Run backend URL
   /// TODO: Update this after deploying backend to Cloud Run

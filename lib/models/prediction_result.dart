@@ -8,6 +8,12 @@ class PredictionResult {
   /// Model confidence score (0.0 to 1.0)
   final double confidence;
   
+  /// CDL ground truth crop type (USDA Cropland Data Layer)
+  final String? cdlCropType;
+  
+  /// Whether model prediction matches CDL ground truth
+  final bool cdlAgreement;
+  
   /// Field area in acres
   final double areaAcres;
   
@@ -26,6 +32,8 @@ class PredictionResult {
   PredictionResult({
     required this.cropType,
     required this.confidence,
+    this.cdlCropType,
+    this.cdlAgreement = false,
     required this.areaAcres,
     required this.carbonIncomeMin,
     required this.carbonIncomeMax,
@@ -48,22 +56,29 @@ class PredictionResult {
   String get areaFormatted => '${areaAcres.toStringAsFixed(1)} acres';
 
   /// Generate shareable text summary
-  String get shareableText => '''
+  String get shareableText {
+    String cdlInfo = cdlCropType != null ? '\nCDL Ground Truth: $cdlCropType' : '';
+    String agreement = cdlAgreement ? ' ✅ Matches CDL' : '';
+    
+    return '''
 🌾 CarbonCheck Field Results
 
-Crop Type: $cropType ($confidencePercentage confidence)
+Model Prediction: $cropType ($confidencePercentage confidence)$agreement$cdlInfo
 Field Area: $areaFormatted
 Estimated CO₂ Income: $incomeRangeFormatted/year
 Average: $incomeAverageFormatted/year
 
 Analyzed on ${predictedAt.toString().split(' ')[0]}
   ''';
+  }
 
   /// Convert to JSON for storage
   Map<String, dynamic> toJson() {
     return {
       'cropType': cropType,
       'confidence': confidence,
+      'cdlCropType': cdlCropType,
+      'cdlAgreement': cdlAgreement,
       'areaAcres': areaAcres,
       'carbonIncomeMin': carbonIncomeMin,
       'carbonIncomeMax': carbonIncomeMax,
@@ -77,6 +92,8 @@ Analyzed on ${predictedAt.toString().split(' ')[0]}
     return PredictionResult(
       cropType: json['cropType'] as String,
       confidence: json['confidence'] as double,
+      cdlCropType: json['cdlCropType'] as String?,
+      cdlAgreement: json['cdlAgreement'] as bool? ?? false,
       areaAcres: json['areaAcres'] as double,
       carbonIncomeMin: json['carbonIncomeMin'] as double,
       carbonIncomeMax: json['carbonIncomeMax'] as double,

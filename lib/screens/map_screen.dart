@@ -2,9 +2,12 @@
 /// 
 /// Displays Google Maps satellite view where users can tap to create
 /// polygon vertices. Shows real-time area calculation and analysis button.
+/// Includes address search for easy navigation to farm location.
 
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:http/http.dart' as http;
 import 'package:carbon_check_field/models/field_data.dart';
 import 'package:carbon_check_field/utils/geo_utils.dart';
 import 'package:carbon_check_field/utils/constants.dart';
@@ -22,6 +25,7 @@ class MapScreen extends StatefulWidget {
 
 class _MapScreenState extends State<MapScreen> {
   GoogleMapController? _mapController;
+  final TextEditingController _searchController = TextEditingController();
   
   // User-drawn polygon points
   final List<LatLng> _polygonPoints = [];
@@ -35,8 +39,17 @@ class _MapScreenState extends State<MapScreen> {
   // Calculated area in acres
   double _areaAcres = 0.0;
   
+  // Search state
+  bool _isSearching = false;
+  
   // Whether user can analyze (needs at least 3 points)
   bool get _canAnalyze => _polygonPoints.length >= AppConstants.minPolygonPoints;
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -76,9 +89,17 @@ class _MapScreenState extends State<MapScreen> {
             mapToolbarEnabled: false,
           ),
           
-          // Instructions overlay (top)
-          const Positioned(
+          // Address search bar (top)
+          Positioned(
             top: 16,
+            left: 16,
+            right: 16,
+            child: _buildSearchBar(),
+          ),
+          
+          // Instructions overlay (below search)
+          const Positioned(
+            top: 80,
             left: 16,
             right: 16,
             child: MapInstructions(),
@@ -246,6 +267,131 @@ class _MapScreenState extends State<MapScreen> {
         ],
       ),
     );
+  }
+
+  /// Build address search bar
+  Widget _buildSearchBar() {
+    return Card(
+      elevation: 8,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(30),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+        child: Row(
+          children: [
+            const Icon(Icons.search, color: Colors.grey),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TextField(
+                controller: _searchController,
+                decoration: const InputDecoration(
+                  hintText: 'Search address (e.g., "123 Farm Rd, Iowa")',
+                  border: InputBorder.none,
+                ),
+                onSubmitted: (_) => _searchAddress(),
+              ),
+            ),
+            if (_isSearching)
+              const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else
+              IconButton(
+                icon: const Icon(Icons.my_location, color: Color(0xFF2E7D32)),
+                onPressed: _searchAddress,
+                tooltip: 'Go to address',
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Search for address and move map using Google Geocoding API
+  Future<void> _searchAddress() async {
+    final address = _searchController.text.trim();
+    
+    if (address.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter an address'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isSearching = true);
+
+    try {
+      // Use Google Geocoding API (works on web!)
+      final encodedAddress = Uri.encodeComponent(address);
+      final url = Uri.parse(
+        'https://maps.googleapis.com/maps/api/geocode/json?address=$encodedAddress&key=${AppConstants.googleMapsApiKey}'
+      );
+      
+      final response = await http.get(url).timeout(const Duration(seconds: 10));
+      
+      if (response.statusCode != 200) {
+        throw Exception('Geocoding service error');
+      }
+      
+      final data = json.decode(response.body);
+      
+      if (data['status'] != 'OK' || data['results'].isEmpty) {
+        throw Exception('Address not found. Try being more specific.');
+      }
+      
+      // Get the first result's location
+      final location = data['results'][0]['geometry']['location'];
+      final lat = location['lat'] as double;
+      final lng = location['lng'] as double;
+      final position = LatLng(lat, lng);
+      
+      // Get formatted address for display
+      final formattedAddress = data['results'][0]['formatted_address'] as String;
+
+      // Animate map to the location
+      _mapController?.animateCamera(
+        CameraUpdate.newLatLngZoom(position, 16), // Zoom level 16 for farm fields
+      );
+
+      // Show success message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Found: $formattedAddress'),
+            duration: const Duration(seconds: 3),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+      
+      // Clear search text
+      _searchController.clear();
+      
+      // Unfocus keyboard
+      FocusScope.of(context).unfocus();
+      
+    } catch (e) {
+      // Show error message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not find address. Please try again.'),
+            duration: const Duration(seconds: 3),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSearching = false);
+      }
+    }
   }
 }
 

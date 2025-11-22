@@ -4,6 +4,7 @@
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:carbon_check_field/firebase_options.dart';
 
 class FirebaseService {
   static bool _initialized = false;
@@ -15,7 +16,9 @@ class FirebaseService {
     if (_initialized) return;
     
     try {
-      await Firebase.initializeApp();
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
       _initialized = true;
       print('✅ Firebase initialized successfully');
     } catch (e) {

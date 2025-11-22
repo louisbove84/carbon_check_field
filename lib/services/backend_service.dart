@@ -142,6 +142,8 @@ class BackendService {
       return PredictionResult(
         cropType: response['crop'] as String,
         confidence: (response['confidence'] as num).toDouble(),
+        cdlCropType: response['cdl_crop'] as String?,
+        cdlAgreement: response['cdl_agreement'] as bool? ?? false,
         areaAcres: areaAcres,
         carbonIncomeMin: (response['co2_income_min'] as num).toDouble(),
         carbonIncomeMax: (response['co2_income_max'] as num).toDouble(),
