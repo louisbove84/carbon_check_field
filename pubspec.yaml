@@ -43,6 +43,9 @@ dependencies:
   
   # UUID generation
   uuid: ^4.2.2
+  
+  # Environment variables
+  flutter_dotenv: ^5.1.0
 
 dev_dependencies:
   flutter_test:
@@ -54,7 +57,8 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   
-  # Assets folder for service account JSON
+  # Assets folder for service account JSON and .env file
   assets:
     - assets/
+    - .env
 

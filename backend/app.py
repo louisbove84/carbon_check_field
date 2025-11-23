@@ -55,7 +55,7 @@ GCP_PROJECT_ID = "ml-pipeline-477612"  # Vertex AI is in this project
 FIREBASE_PROJECT_ID = "carbon-check-field"  # Firebase Auth is in this project
 VERTEX_AI_ENDPOINT = (
     "projects/ml-pipeline-477612/locations/us-central1/"
-    "endpoints/447851976714092544"  # crop-endpoint-1763716420
+    "endpoints/2450616804754587648"  # crop-endpoint (active)
 )
 SENTINEL2_COLLECTION = "COPERNICUS/S2_SR_HARMONIZED"
 

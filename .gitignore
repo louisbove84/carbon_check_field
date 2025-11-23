@@ -61,3 +61,14 @@ android/app/google-services.json
 android/app/src/main/AndroidManifest.xml
 ios/Runner/Info.plist
 
+# ML Pipeline - Python virtual environments and credentials
+ml_pipeline/__pycache__/
+ml_pipeline/*.pyc
+ml_pipeline/venv/
+ml_pipeline/.env
+ml_pipeline/*.log
+ml_pipeline/service-account.json
+
+# Web configuration with API keys (generated from .env)
+web/config.js
+

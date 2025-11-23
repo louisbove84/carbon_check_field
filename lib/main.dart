@@ -7,12 +7,23 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:carbon_check_field/screens/home_screen.dart';
 import 'package:carbon_check_field/services/firebase_service.dart';
 
 void main() async {
   // Ensure Flutter is initialized
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Load environment variables from .env file
+  try {
+    await dotenv.load(fileName: ".env");
+    print('✅ Environment variables loaded');
+  } catch (e) {
+    print('⚠️ Failed to load .env file: $e');
+    print('⚠️ Make sure .env file exists in the project root');
+    // App can still run, but API keys won't be available
+  }
   
   // Initialize Firebase
   try {

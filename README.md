@@ -1,117 +1,88 @@
 # CarbonCheck Field 🌾
 
-A beautiful Flutter mobile app for farmers to analyze crop types and estimate carbon credit income by drawing field boundaries on a satellite map.
+A secure Flutter mobile app that helps farmers analyze crop types and estimate carbon credit income by drawing field boundaries on satellite maps.
+
+## ✨ Features
+
+- **Interactive Field Drawing** - Draw field boundaries by tapping corners on Google Maps satellite view with real-time acreage calculation
+- **Satellite Analysis** - Queries Sentinel-2 imagery and computes 17 NDVI-based features via Earth Engine
+- **AI Crop Classification** - Predicts crop type (Corn, Soybeans, Alfalfa, Winter Wheat) using Vertex AI
+- **CDL Ground Truth** - Shows USDA Cropland Data Layer results alongside model predictions
+- **Address Search** - Quick field location using address lookup
+- **Carbon Credit Estimates** - Real-world 2025 rates from Indigo Ag & Truterra ($10-$25/acre)
+- **Shareable Results** - Export field analysis for sharing
 
 ## 🔒 100% Secure Architecture
 
-**No service account keys in the app!** Uses Firebase Auth + secure Cloud Run backend.
+**No service account keys in the app!** 
 
-## Features
-
-✨ **Interactive Field Drawing**  
-- Draw field boundaries by tapping corners on Google Maps satellite view
-- Real-time area calculation in acres
-- Edit and adjust polygon points after placement
-
-🛰️ **Satellite Analysis**  
-- Queries Sentinel-2 SR Harmonized imagery (2024)
-- Computes 17 NDVI-based features via Earth Engine
-- Handles temporal analysis (early season vs late season)
-- **Secure:** All processing happens on backend, not in app
-
-🤖 **AI Crop Classification**  
-- Deployed Vertex AI model endpoint
-- Predicts crop type with confidence score
-- Supports: Corn, Soybeans, Alfalfa, Winter Wheat
-- **Secure:** API calls from backend with Application Default Credentials
-
-💰 **Carbon Credit Estimates**  
-- Real-world 2025 rates from Indigo Ag & Truterra
-- Shows income range and average per year
-- Shareable results card
-
-🔐 **Security First**  
 - Firebase Authentication (anonymous login)
-- Secure Cloud Run backend
-- No credentials stored in mobile app
+- Secure Cloud Run backend with Application Default Credentials
+- No GCP credentials stored in mobile app
 - HTTPS encryption everywhere
 
-## Architecture
-
-The app is organized into focused, testable modules:
-
 ```
-lib/
-├── main.dart                    # App entry point
-├── models/                      # Data models
-│   ├── field_data.dart         # Field polygon + features
-│   └── prediction_result.dart  # Crop prediction + CO₂ income
-├── screens/                     # UI screens
-│   ├── home_screen.dart        # Landing page
-│   ├── map_screen.dart         # Interactive map with polygon drawing
-│   └── results_screen.dart     # Analysis results display
-├── services/                    # Business logic (API calls)
-│   ├── auth_service.dart       # Google Cloud OAuth2 authentication
-│   ├── earth_engine_service.dart   # NDVI feature computation
-│   └── vertex_ai_service.dart  # Crop prediction
-├── utils/                       # Utility functions
-│   ├── constants.dart          # App-wide configuration
-│   └── geo_utils.dart          # Geospatial calculations
-└── widgets/                     # Reusable UI components
-    ├── area_display_card.dart
-    ├── loading_overlay.dart
-    ├── map_instructions.dart
-    └── result_card.dart
+Flutter App → Firebase Auth → Cloud Run Backend → Earth Engine + Vertex AI
+(no keys!)                   (secure credentials)
 ```
 
-## Setup Instructions
+---
 
-### 1. Prerequisites
+## 🚀 Quick Start
+
+### Prerequisites
 
 - Flutter SDK 3.0+
-- Google Cloud project with:
-  - Earth Engine API enabled
-  - Vertex AI API enabled
-  - Service account with appropriate permissions
-- Google Maps API keys (iOS + Android)
+- Google Cloud project with Earth Engine & Vertex AI enabled
+- Firebase project
+- Google Maps API key
 
-### 2. Clone & Install Dependencies
+### 1. Clone & Install
 
 ```bash
 cd /Users/beuxb/Desktop/Projects/carbon_check_field
 flutter pub get
 ```
 
-### 3. Configure Service Account
+### 2. Setup Firebase
 
-Copy your service account JSON to `assets/service-account.json`:
+1. Download Firebase config files:
+   - `google-services.json` → `android/app/`
+   - `GoogleService-Info.plist` → `ios/Runner/`
+
+2. Enable anonymous authentication in Firebase Console
+
+### 3. Add Google Maps API Key
+
+Edit `lib/utils/constants.dart`:
+```dart
+static const String googleMapsApiKey = 'YOUR_GOOGLE_MAPS_API_KEY';
+```
+
+**Important:** The API key is stored locally and .gitignored. See deployment section for production builds.
+
+### 4. Deploy Backend
 
 ```bash
-cp ~/path/to/your-service-account.json assets/service-account.json
+cd backend
+./setup_and_deploy.sh
 ```
 
-**Important:** This file is gitignored to prevent accidental commits of credentials.
+This deploys the secure Cloud Run backend that handles all GCP API calls.
 
-### 4. Add Google Maps API Keys
+### 5. Update Backend URL
 
-**Android:**  
-Edit `android/app/src/main/AndroidManifest.xml` and replace:
-```xml
-<meta-data
-    android:name="com.google.android.geo.API_KEY"
-    android:value="YOUR_ACTUAL_ANDROID_API_KEY"/>
+After deployment, update `lib/utils/constants.dart`:
+```dart
+static const String backendUrl = 'https://your-service-url.run.app';
 ```
 
-**iOS:**  
-Edit `ios/Runner/Info.plist` and replace:
-```xml
-<key>GMSApiKey</key>
-<string>YOUR_ACTUAL_IOS_API_KEY</string>
-```
-
-### 5. Run the App
+### 6. Run the App
 
 ```bash
+# Web (Chrome)
+flutter run -d chrome
+
 # iOS
 flutter run -d ios
 
@@ -119,42 +90,215 @@ flutter run -d ios
 flutter run -d android
 ```
 
-## Key Implementation Details
+---
 
-### Earth Engine Integration
+## 📁 Project Structure
 
-The `earth_engine_service.dart` file handles all Earth Engine REST API calls:
-- Filters Sentinel-2 imagery by date range (2024) and cloud cover (<20%)
-- Computes NDVI from Red (B4) and NIR (B8) bands
-- Calculates statistics: mean, std, min, max, percentiles (p25, p50, p75)
-- Derives temporal features (early vs late season NDVI)
-- Adds elevation and geographic coordinates
+```
+lib/
+├── main.dart                      # App entry point + Firebase init
+├── models/
+│   ├── field_data.dart           # Field polygon + geographic data
+│   └── prediction_result.dart    # Crop prediction + CO₂ income
+├── screens/
+│   ├── home_screen.dart          # Landing page
+│   ├── map_screen.dart           # Interactive map with drawing
+│   └── results_screen.dart       # Analysis results + CDL data
+├── services/
+│   ├── firebase_service.dart     # Authentication
+│   └── backend_service.dart      # Secure API calls to Cloud Run
+├── utils/
+│   ├── constants.dart            # Configuration (API keys, URLs)
+│   └── geo_utils.dart            # Geospatial calculations
+└── widgets/                       # Reusable UI components
 
-**Feature Vector (17 values in exact order):**
-1. `ndvi_mean`, `ndvi_std`, `ndvi_min`, `ndvi_max`
-2. `ndvi_p25`, `ndvi_p50`, `ndvi_p75`
-3. `ndvi_early`, `ndvi_late`, `elevation_m`
-4. `longitude`, `latitude`
-5. `ndvi_range`, `ndvi_iqr`, `ndvi_change`
-6. `ndvi_early_ratio`, `ndvi_late_ratio`
+backend/
+├── app.py                         # FastAPI server
+├── Dockerfile                     # Container definition
+├── requirements.txt               # Python dependencies
+└── setup_and_deploy.sh           # Deployment script
 
-### Vertex AI Prediction
+ml_pipeline/                        # 🤖 Automated ML Training Pipeline
+├── monthly_data_collection.py     # Collects training data from Earth Engine
+├── auto_retrain_model.py          # Retrains & deploys model in Vertex AI
+├── requirements.txt               # Python dependencies
+├── pipeline_config.yaml           # Configuration (crops, schedule, etc.)
+├── deploy_pipeline.sh             # One-click deployment
+├── README.md                      # Full pipeline documentation
+├── QUICK_REFERENCE.md             # Quick commands & URLs
+└── local_testing_guide.md         # Local testing instructions
+```
 
-The `vertex_ai_service.dart` file:
-- Sends 17-feature vector to your deployed model endpoint
-- Parses response: `{"predictions": ["Corn"]}` or `[["Corn", 0.98]]`
-- Maps crop type to carbon credit rates
-- Calculates income estimates based on field acreage
+---
 
-### Polygon Drawing
+## 🤖 Automated ML Pipeline
 
-The `map_screen.dart` implements:
-- Tap-to-add polygon vertices
-- Draggable markers for editing points
-- Real-time area calculation using Shoelace formula
-- Validation (min 3 points, max 50 points, size limits)
+**NEW!** This project includes a fully automated machine learning pipeline that:
 
-## Carbon Credit Rates (2025)
+- ✅ **Collects** fresh training data from Earth Engine every month
+- ✅ **Retrains** the crop classification model with all historical data
+- ✅ **Deploys** the updated model to production automatically
+- ✅ **Zero manual work** required after setup!
+
+### Quick Setup
+
+```bash
+cd ml_pipeline
+./deploy_pipeline.sh
+```
+
+**That's it!** The pipeline now runs automatically:
+- **1st of each month:** Collect 400 new training samples (100 per crop)
+- **5th of each month:** Retrain model and deploy to Vertex AI endpoint
+
+### Manual Testing
+
+```bash
+# Trigger data collection manually
+curl -X POST https://us-central1-ml-pipeline-477612.cloudfunctions.net/monthly-data-collection
+
+# Trigger model retraining manually
+curl -X POST https://us-central1-ml-pipeline-477612.cloudfunctions.net/auto-retrain-model
+```
+
+### Learn More
+
+- 📖 **Full Documentation:** [`ml_pipeline/README.md`](ml_pipeline/README.md)
+- ⚡ **Quick Commands:** [`ml_pipeline/QUICK_REFERENCE.md`](ml_pipeline/QUICK_REFERENCE.md)
+- 🧪 **Local Testing:** [`ml_pipeline/local_testing_guide.md`](ml_pipeline/local_testing_guide.md)
+
+---
+
+## 🔧 Architecture
+
+### High-Level Flow
+
+```
+1. User draws field polygon on map
+2. User taps "Analyze Field"
+3. Flutter app:
+   - Signs in anonymously with Firebase
+   - Gets Firebase ID token
+   - Sends polygon + token to Cloud Run backend
+4. Cloud Run backend:
+   - Verifies Firebase token
+   - Calls Earth Engine (17 NDVI features)
+   - Calls Vertex AI (crop prediction)
+   - Queries USDA CDL (ground truth)
+   - Returns JSON with results
+5. Flutter displays:
+   - Crop type + confidence
+   - CDL ground truth + agreement indicator
+   - Field area (acres)
+   - CO₂ income range
+```
+
+### Key Technical Decisions
+
+- **Flutter** - Single codebase for iOS + Android
+- **Cloud Run Backend** - Keeps all GCP credentials secure
+- **Firebase Auth** - No user registration required (anonymous)
+- **Direct REST APIs** - No Earth Engine SDK needed
+- **17 NDVI Features** - Temporal + spatial statistics from Sentinel-2
+
+---
+
+## 🧪 Testing
+
+### Test on Chrome (Easiest)
+
+```bash
+flutter run -d chrome
+```
+
+### Test on iOS Simulator
+
+```bash
+open -a Simulator
+flutter run -d ios
+```
+
+### Test on Android Device
+
+1. Enable USB debugging on your phone
+2. Connect via USB
+3. Run:
+```bash
+adb devices
+flutter run -d android
+```
+
+### Verify Backend
+
+```bash
+# Health check
+curl https://your-backend-url.run.app/health
+```
+
+---
+
+## 🚢 Deployment
+
+### Android APK
+
+```bash
+# Debug build
+flutter build apk --debug
+adb install -r build/app/outputs/flutter-apk/app-debug.apk
+
+# Release build
+flutter build appbundle --release
+```
+
+Upload `build/app/outputs/bundle/release/app-release.aab` to Google Play Console.
+
+### iOS App Store
+
+```bash
+flutter build ios --release
+```
+
+Then open `ios/Runner.xcworkspace` in Xcode to archive and upload.
+
+### App Icons
+
+Custom app icon is configured in:
+- `android/app/src/main/res/mipmap-*/ic_launcher.png`
+- `ios/Runner/Assets.xcassets/AppIcon.appiconset/`
+
+---
+
+## 🔐 Security Details
+
+### What's Secure
+
+✅ **No GCP credentials in app** - All API calls go through Cloud Run backend  
+✅ **Application Default Credentials** - Backend uses Google-managed auth  
+✅ **Firebase token verification** - Backend validates every request  
+✅ **API key restrictions** - Google Maps key restricted by bundle ID  
+✅ **HTTPS everywhere** - All network traffic encrypted  
+
+### API Keys Management
+
+**Development:**
+- Keys stored locally in `lib/utils/constants.dart`
+- File is .gitignored to prevent commits
+
+**Production:**
+- For app store builds, keys must be added before compiling
+- Consider using Flutter environment variables or Firebase Remote Config
+- See `DEPLOYMENT.md` for full strategy
+
+### Firebase Setup
+
+1. Firebase Console → Authentication → Enable "Anonymous"
+2. Add iOS app (bundle ID: `com.carboncheck.field`)
+3. Add Android app (package name: `com.carboncheck.field`)
+4. Download config files and place in respective directories
+
+---
+
+## 💰 Carbon Credit Rates (2025)
 
 | Crop         | Rate ($/acre/year) |
 |--------------|--------------------|
@@ -163,104 +307,111 @@ The `map_screen.dart` implements:
 | Alfalfa      | $18 - $25          |
 | Winter Wheat | $10 - $15          |
 
-*Rates based on Indigo Ag and Truterra carbon credit markets.*
+*Based on Indigo Ag and Truterra carbon credit markets*
 
-## Testing Individual Components
+---
 
-Each service and utility file is designed to be testable independently:
+## 🐛 Troubleshooting
 
-```dart
-// Test authentication
-final authService = AuthService();
-await authService.initialize();
-final token = await authService.getAccessToken();
-print('Token: ${token.substring(0, 20)}...');
+### "Firebase initialization failed"
+- Ensure `google-services.json` and `GoogleService-Info.plist` are in correct directories
+- Run `flutterfire configure` to regenerate configs
 
-// Test geospatial utilities
-final area = GeoUtils.calculatePolygonAreaAcres([
-  LatLng(41.0, -93.0),
-  LatLng(41.01, -93.0),
-  LatLng(41.01, -93.01),
-  LatLng(41.0, -93.01),
-]);
-print('Area: $area acres');
+### "Map is blank"
+- Check Google Maps API key in `constants.dart`
+- Enable billing on your GCP project
+- Verify Maps SDK for iOS/Android are enabled
 
-// Test Earth Engine connection
-final eeService = EarthEngineService(authService);
-final isConnected = await eeService.testConnection();
-print('EE Connected: $isConnected');
+### "Analysis failed"
+- Check backend URL in `constants.dart`
+- Verify Cloud Run service is deployed
+- Check Cloud Run logs: `gcloud run logs read carboncheck-field-api --region us-central1`
+
+### "Device not found" (Android)
+- Install adb: `brew install --cask android-platform-tools`
+- Reconnect phone and allow USB debugging
+- Run: `adb devices` to verify connection
+
+### Gradle errors (Android)
+- Run: `cd android && ./gradlew clean`
+- Update Gradle wrapper if needed
+- Accept licenses: `flutter doctor --android-licenses`
+
+---
+
+## 📊 Monitoring
+
+### Cloud Run Logs
+```bash
+gcloud run logs tail carboncheck-field-api --region us-central1
 ```
 
-## Known Issues & TODOs
+### Firebase Users
+- Firebase Console → Authentication → Users
+- Monitor anonymous user count
 
-### ⚠️ JWT Signing Implementation
+### API Usage
+- Google Cloud Console → APIs & Services → Dashboard
+- Monitor Earth Engine and Vertex AI quotas
 
-The `auth_service.dart` file currently has a placeholder for RSA-SHA256 signing of JWT tokens. You have two options:
+---
 
-**Option 1: Add pointycastle dependency**
-```yaml
-dependencies:
-  pointycastle: ^3.7.3
+## 💾 Data Flow
+
+### Earth Engine Features (17 values)
+
+1. NDVI statistics: mean, std, min, max
+2. Percentiles: p25, p50, p75
+3. Temporal: early_season, late_season
+4. Location: latitude, longitude, elevation
+5. Derived: range, IQR, change, early_ratio, late_ratio
+
+### Backend Response Format
+
+```json
+{
+  "crop": "Corn",
+  "confidence": 0.98,
+  "area_acres": 47.2,
+  "co2_income_low": 1240,
+  "co2_income_high": 1880,
+  "cdl_crop": "Corn",
+  "cdl_confidence": 0.95,
+  "cdl_year": 2024,
+  "matches_cdl": true
+}
 ```
-Then implement proper RSA signing in `_signMessage()` method.
 
-**Option 2: Use backend token service (recommended for production)**
-Create a simple Cloud Function or Cloud Run service that:
-1. Receives a request from the app
-2. Signs JWT using service account private key server-side
-3. Returns access token
+---
 
-This keeps private keys secure on the backend.
+## 🎯 Future Enhancements
 
-### 📝 Future Enhancements
-
-- [ ] Implement proper JWT signing (see above)
-- [ ] Add field history/persistence (SQLite or Firebase)
-- [ ] Support offline mode with cached map tiles
-- [ ] Add field comparison feature
-- [ ] Generate PDF reports
+- [ ] Field history storage (SQLite/Firebase)
 - [ ] Multi-year trend analysis
-- [ ] Integration with farm management systems
+- [ ] Offline mode with cached tiles
+- [ ] PDF report generation
+- [ ] User accounts (email/social login)
+- [ ] Team/organization support
+- [ ] Carbon marketplace integration
 
-## App Store Deployment
+---
 
-### iOS
-
-1. Update `ios/Runner.xcodeproj` with:
-   - Bundle identifier
-   - Code signing team
-   - Deployment target (iOS 12+)
-
-2. Build release:
-```bash
-flutter build ios --release
-```
-
-3. Archive and upload via Xcode
-
-### Android
-
-1. Update `android/app/build.gradle`:
-   - Application ID
-   - Version code/name
-   - Signing config
-
-2. Build release:
-```bash
-flutter build appbundle --release
-```
-
-3. Upload to Google Play Console
-
-## License
+## 📜 License
 
 MIT License - See LICENSE file for details
 
-## Support
+---
 
-For issues or questions, please contact the development team or open an issue on the repository.
+## 🙋 Support
+
+For issues or questions:
+1. Check troubleshooting section above
+2. Review Cloud Run logs for backend errors
+3. Check Firebase Auth is properly configured
+4. Verify all API keys are correct
 
 ---
 
 **Built with ❤️ for farmers using Flutter, Earth Engine, and Vertex AI**
 
+**Default Map Center:** 44.409438290384166, -88.4304410977501 (Northeast Wisconsin)

@@ -234,6 +234,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
                     label: const Text('Share'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF1976D2),
+                      foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 16),
                     ),
                   ),

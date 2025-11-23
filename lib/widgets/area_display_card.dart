@@ -22,7 +22,7 @@ class AreaDisplayCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 16.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -35,29 +35,29 @@ class AreaDisplayCard extends StatelessWidget {
                 Text(
                   areaAcres.toStringAsFixed(1),
                   style: const TextStyle(
-                    fontSize: 36,
+                    fontSize: 28,
                     fontWeight: FontWeight.bold,
                     color: Color(0xFF2E7D32),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 const Text(
                   'acres',
                   style: TextStyle(
-                    fontSize: 20,
+                    fontSize: 16,
                     color: Colors.grey,
                   ),
                 ),
               ],
             ),
             
-            const SizedBox(height: 8),
+            const SizedBox(height: 4),
             
             // Point count
             Text(
               '$pointCount points',
               style: const TextStyle(
-                fontSize: 14,
+                fontSize: 12,
                 color: Colors.grey,
               ),
             ),

@@ -1,3 +1,5 @@
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
 /// Application-wide constants for CarbonCheck Field
 /// 
 /// This file contains all hardcoded values, API endpoints, 
@@ -9,8 +11,17 @@ class AppConstants {
   // ============================================================
   
   /// Google Maps API key (for geocoding and maps)
-  /// NOTE: In production, this should be in environment variables
-  static const String googleMapsApiKey = 'AIzaSyCAf6KxL_60PsKZlVyBLBPIyD6Rs8df0GA';
+  /// Loaded from .env file for security
+  static String get googleMapsApiKey {
+    final key = dotenv.env['GOOGLE_MAPS_API_KEY'];
+    if (key == null || key.isEmpty) {
+      throw Exception(
+        'GOOGLE_MAPS_API_KEY not found in .env file. '
+        'Please create .env file with GOOGLE_MAPS_API_KEY=your_key'
+      );
+    }
+    return key;
+  }
   
   /// Secure Cloud Run backend URL
   /// TODO: Update this after deploying backend to Cloud Run
@@ -49,9 +60,9 @@ class AppConstants {
   /// App accent color (sky blue)
   static const int accentColorValue = 0xFF1976D2;
   
-  /// Default map camera position (center of US farmland)
-  static const double defaultLatitude = 41.8781;
-  static const double defaultLongitude = -93.0977;
+  /// Default map camera position
+  static const double defaultLatitude = 44.409438290384166;
+  static const double defaultLongitude = -88.4304410977501;
   static const double defaultZoom = 15.0;
   
   /// Minimum polygon points required

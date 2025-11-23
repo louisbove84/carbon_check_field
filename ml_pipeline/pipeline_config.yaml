@@ -1,0 +1,172 @@
+# ============================================================
+# ML PIPELINE CONFIGURATION
+# ============================================================
+# Central configuration for automated training pipeline
+# Edit these values to customize your pipeline behavior
+# ============================================================
+
+# Google Cloud Project Configuration
+project:
+  id: "ml-pipeline-477612"
+  region: "us-central1"
+  bucket: "carboncheck-data"
+
+# BigQuery Configuration
+bigquery:
+  dataset_id: "crop_ml"
+  table_id: "training_features"
+  # Partition by collection_date for efficient queries
+  partitioning:
+    enabled: true
+    field: "collection_date"
+    type: "DAY"
+
+# Data Collection Configuration
+data_collection:
+  # Number of samples to collect per crop each month
+  samples_per_crop: 100
+  
+  # Sentinel-2 filtering
+  max_cloud_coverage: 20  # percent
+  
+  # Date ranges for temporal features
+  early_season:
+    start: "04-01"  # April 1
+    end: "05-31"    # May 31
+  late_season:
+    start: "08-01"  # August 1
+    end: "09-30"    # September 30
+  
+  # Crops to sample with their CDL codes and top counties
+  crops:
+    - name: "Corn"
+      cdl_code: 1
+      # Top corn-producing counties (GEOID format)
+      counties:
+        - "17113"  # McLean County, IL
+        - "17019"  # Champaign County, IL
+        - "17105"  # Livingston County, IL
+        - "18141"  # St. Joseph County, IN
+        - "18003"  # Allen County, IN
+        - "19169"  # Story County, IA
+        - "19153"  # Polk County, IA
+        - "19013"  # Black Hawk County, IA
+        - "27079"  # Le Sueur County, MN
+        - "27165"  # Watonwan County, MN
+    
+    - name: "Soybeans"
+      cdl_code: 5
+      counties:
+        - "17113"  # McLean County, IL
+        - "17019"  # Champaign County, IL
+        - "18141"  # St. Joseph County, IN
+        - "18003"  # Allen County, IN
+        - "18033"  # DeKalb County, IN
+        - "19169"  # Story County, IA
+        - "19153"  # Polk County, IA
+        - "19013"  # Black Hawk County, IA
+        - "27079"  # Le Sueur County, MN
+        - "27165"  # Watonwan County, MN
+    
+    - name: "Alfalfa"
+      cdl_code: 36
+      counties:
+        - "06025"  # Imperial County, CA
+        - "06107"  # Tulare County, CA
+        - "06099"  # Stanislaus County, CA
+        - "06111"  # Ventura County, CA
+        - "53077"  # Yakima County, WA
+        - "53003"  # Asotin County, WA
+        - "16083"  # Twin Falls County, ID
+        - "08123"  # Weld County, CO
+        - "08069"  # Larimer County, CO
+    
+    - name: "Winter Wheat"
+      cdl_code: 24
+      counties:
+        - "20095"  # Kingman County, KS
+        - "20199"  # Sumner County, KS
+        - "20155"  # Reno County, KS
+        - "20051"  # Ellis County, KS
+        - "20165"  # Rush County, KS
+        - "40047"  # Garfield County, OK
+        - "40011"  # Blaine County, OK
+        - "48179"  # Gray County, TX
+        - "31081"  # Hamilton County, NE
+        - "31089"  # Holt County, NE
+
+# Model Training Configuration
+model_training:
+  # Vertex AI endpoint for deployment
+  endpoint_id: "447851976714092544"
+  
+  # Training job configuration
+  training:
+    optimization_type: "classification"
+    optimization_objective: "minimize-log-loss"
+    budget_hours: 1.0  # Training budget in node-hours
+    
+  # Features to use for training
+  features:
+    - "ndvi_mean"
+    - "ndvi_std"
+    - "ndvi_min"
+    - "ndvi_max"
+    - "ndvi_p25"
+    - "ndvi_p50"
+    - "ndvi_p75"
+    - "ndvi_early"
+    - "ndvi_late"
+    - "elevation_m"
+    - "latitude"
+    - "longitude"
+  
+  # Target column
+  target: "crop"
+  
+  # Data quality thresholds
+  quality_checks:
+    min_total_samples: 100
+    max_imbalance_ratio: 2.0  # max_samples / min_samples
+    max_null_percentage: 5.0
+
+# Scheduling Configuration
+scheduling:
+  # Data collection schedule (cron format, UTC)
+  data_collection:
+    schedule: "0 2 1 * *"  # 2am on 1st of each month
+    description: "Monthly crop data collection from Earth Engine"
+  
+  # Model retraining schedule
+  model_retraining:
+    schedule: "0 3 5 * *"  # 3am on 5th of each month
+    description: "Monthly model retraining after data collection"
+    # Wait a few days after data collection to ensure data quality
+
+# Notifications (optional)
+notifications:
+  enabled: false
+  # Email notifications via SendGrid/etc
+  email:
+    recipients:
+      - "your-email@example.com"
+    on_success: false
+    on_failure: true
+  # Slack webhook (optional)
+  slack:
+    webhook_url: ""
+    on_success: true
+    on_failure: true
+
+# Monitoring and Logging
+monitoring:
+  # Cloud Logging
+  log_level: "INFO"
+  
+  # Custom metrics to track
+  metrics:
+    - "samples_collected_per_crop"
+    - "model_accuracy"
+    - "training_duration_minutes"
+    - "data_quality_score"
+

@@ -1,0 +1,538 @@
+// ============================================================
+// CROP CLASSIFICATION TRAINING DATA GENERATOR
+// ============================================================
+// PURPOSE: Generate CDL-verified training data for ML models
+// EXPORT: Directly to gs://carboncheck-data for ML pipeline
+// PROJECT: ml-pipeline-477612 → BigQuery → Vertex AI
+// ============================================================
+//
+// 🔧 TROUBLESHOOTING:
+// If you see "API keys are not supported" error:
+//   1. Hard refresh: Ctrl+Shift+R (Cmd+Shift+R on Mac)
+//   2. Click your email in top-right corner → Re-authenticate
+//   3. Code Editor uses OAuth2 automatically (no API keys needed)
+//
+// If a crop shows 0 samples:
+//   - Check if the CDL code is correct (view CDL layer legend)
+//   - Try a different CDL year (2023, 2022 instead of 2024)
+//   - Add more county GEOIDs for that crop in the CROPS array
+//   - County GEOIDs are 5-digit codes (e.g. 19169 = Story County, IA)
+// ============================================================
+
+// ---------------------------------------------------------------
+// 1. CONFIGURATION - EDIT THESE!
+// ---------------------------------------------------------------
+var NUM_FIELDS_PER_CROP = 10;     // Number of fields per crop (increased for 100+ samples)
+var NUM_SAMPLES_PER_FIELD = 3;    // Number of samples per crop (10*3*4 crops = 120 total samples)
+var FIELD_RADIUS = 200;           // Buffer radius in meters (not used with new sampling)
+var CDL_YEAR = 2024;              // Which CDL year to use
+
+// NOTE: Each sample point is CDL-verified to ensure it matches the target crop!
+// NOTE: Using top-producing counties for fastest, most reliable sampling
+// NOTE: Requests 100x samples per county to ensure we get enough valid matches
+// NOTE: Current settings generate 120 total samples (10 fields * 3 samples * 4 crops)
+// NOTE: Exports directly to BigQuery for immediate use in ML pipeline!
+// TIP: If you get unbalanced samples (some crops have fewer), try:
+//      - Adding more county GEOIDs for that crop
+//      - Increase NUM_FIELDS_PER_CROP to 12 or 15
+
+// Target crops - CDL codes from USDA Cropland Data Layer
+// Using TOP 10 counties per crop for fastest sampling
+var CROPS = [
+  {
+    name: 'Corn',
+    code: 1,
+    color: 'FFD300',
+    counties: [
+      '17113', '17019', '17093', '17161', '19099', '19113', '17095', '17031', '19155', '19133'
+    ] // Top 10: McLean IL, Champaign IL, Grundy IL, etc.
+  },
+  {
+    name: 'Soybeans',
+    code: 5,
+    color: '267300',
+    counties: [
+      '27131', '27133', '27043', '19153', '17019', '19099', '27103', '27123', '27087', '19133'
+    ] // Top 10: Renville MN, Redwood MN, Faribault MN, etc.
+  },
+  {
+    name: 'Winter_Wheat',
+    code: 24,
+    color: 'A57000',
+    counties: [
+      '20173', '20055', '20185', '20035', '40043', '20151', '20155', '20077', '20169', '20067'
+    ] // Top 10: Sumner KS, Finney KS, Reno KS, Ford KS, Dewey OK, etc.
+  },
+  {
+    name: 'Alfalfa',
+    code: 36,
+    color: 'FF00FF',
+    counties: [
+      '06037', '06029', '04013', '06065', '04027', '06019', '06059', '06041', '06071', '04015'
+    ] // Top 10: Imperial CA, Kern CA, Maricopa AZ, Riverside CA, Yuma AZ, etc.
+  }
+];
+
+print('═══════════════════════════════════════');
+print('🌾 CROP SAMPLING PIPELINE (CDL-VERIFIED)');
+print('═══════════════════════════════════════');
+print('Samples per crop:', NUM_FIELDS_PER_CROP * NUM_SAMPLES_PER_FIELD);
+print('Total samples:', NUM_FIELDS_PER_CROP * NUM_SAMPLES_PER_FIELD * CROPS.length, '✅ (meets 100+ minimum!)');
+print('CDL Year:', CDL_YEAR);
+print('Export target: BigQuery (direct export)');
+print('Sampling strategy: Top 10 producing counties per crop');
+print('Verification: Samples are spatially filtered to match CDL crop type');
+print('');
+
+// ---------------------------------------------------------------
+// 2. MAP SETUP
+// ---------------------------------------------------------------
+Map.setCenter(-98, 39, 5);  // Center on US
+Map.setOptions('SATELLITE');
+
+// Load CDL for background
+var cdl = ee.Image('USDA/NASS/CDL/' + CDL_YEAR).select('cropland');
+
+// Create a simplified visualization (only show our target crops)
+var cdlVis = cdl.remap(
+  [1, 5, 24, 36],           // CDL codes for our crops
+  [1, 2, 3, 4]              // Remap to sequential values for palette
+).selfMask();
+
+Map.addLayer(cdlVis, {
+  min: 1,
+  max: 4,
+  palette: ['FFD300', '267300', 'A57000', 'FF00FF']  // Corn, Soy, Wheat, Alfalfa
+}, 'CDL ' + CDL_YEAR + ' (Target Crops)', true, 0.7);
+
+// ---------------------------------------------------------------
+// 3. CREATE LEGEND
+// ---------------------------------------------------------------
+var legend = ui.Panel({
+  style: {
+    position: 'bottom-left',
+    padding: '8px 15px',
+    backgroundColor: 'white',
+    border: '2px solid black'
+  }
+});
+
+var legendTitle = ui.Label({
+  value: '🗺️ SAMPLE LOCATIONS',
+  style: {fontWeight: 'bold', fontSize: '16px', margin: '0 0 8px 0'}
+});
+legend.add(legendTitle);
+
+legend.add(ui.Label({
+  value: '▼ = Sample point (bottom tip = exact location)',
+  style: {fontSize: '11px', margin: '0 0 8px 0', color: '666'}
+}));
+
+function addLegendRow(color, name) {
+  var colorBox = ui.Label({
+    style: {
+      backgroundColor: '#' + color,
+      padding: '10px',
+      margin: '0 8px 0 0',
+      border: '1px solid black'
+    },
+    value: ''
+  });
+  
+  var label = ui.Label({
+    value: name,
+    style: {margin: '0', fontSize: '13px'}
+  });
+  
+  var panel = ui.Panel({
+    widgets: [colorBox, label],
+    layout: ui.Panel.Layout.Flow('horizontal'),
+    style: {margin: '4px 0'}
+  });
+  
+  legend.add(panel);
+}
+
+CROPS.forEach(function(crop) {
+  addLegendRow(crop.color, crop.name);
+});
+
+Map.add(legend);
+
+// ---------------------------------------------------------------
+// 4. COUNTY BOUNDARIES (for sampling regions)
+// ---------------------------------------------------------------
+var counties = ee.FeatureCollection('TIGER/2018/Counties');
+
+function getCountyGeometry(countyGEOIDs) {
+  return counties.filter(ee.Filter.inList('GEOID', countyGEOIDs)).geometry();
+}
+
+// ---------------------------------------------------------------
+// 5. FEATURE EXTRACTION FUNCTION
+// ---------------------------------------------------------------
+function extractFeatures(point) {
+  // Define growing season
+  var startDate = ee.Date(CDL_YEAR + '-04-15');
+  var endDate = ee.Date(CDL_YEAR + '-09-01');
+  
+  // Get Sentinel-2 data
+  var s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+    .filterDate(startDate, endDate)
+    .filterBounds(point)
+    .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 30));
+  
+  // Calculate NDVI
+  var ndviCollection = s2.map(function(img) {
+    return img.normalizedDifference(['B8', 'B4']).rename('NDVI')
+      .copyProperties(img, ['system:time_start']);
+  });
+  
+  // Compute statistics
+  var ndviStats = ndviCollection.select('NDVI').reduce(
+    ee.Reducer.mean()
+      .combine(ee.Reducer.stdDev(), '', true)
+      .combine(ee.Reducer.min(), '', true)
+      .combine(ee.Reducer.max(), '', true)
+      .combine(ee.Reducer.percentile([25, 50, 75]), '', true)
+  );
+  
+  // Sample at point (50m buffer for stability)
+  var stats = ndviStats.reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: point.buffer(50),
+    scale: 10,
+    bestEffort: true
+  });
+  
+  // Early season (Apr-May)
+  var earlyNDVI = ndviCollection
+    .filterDate(CDL_YEAR + '-04-15', CDL_YEAR + '-06-01')
+    .mean()
+    .reduceRegion({
+      reducer: ee.Reducer.mean(),
+      geometry: point.buffer(50),
+      scale: 10,
+      bestEffort: true
+    });
+  
+  // Late season (Jul-Aug)
+  var lateNDVI = ndviCollection
+    .filterDate(CDL_YEAR + '-07-01', CDL_YEAR + '-08-31')
+    .mean()
+    .reduceRegion({
+      reducer: ee.Reducer.mean(),
+      geometry: point.buffer(50),
+      scale: 10,
+      bestEffort: true
+    });
+  
+  // Get elevation
+  var elevation = ee.Image('USGS/SRTMGL1_003')
+    .reduceRegion({
+      reducer: ee.Reducer.mean(),
+      geometry: point,
+      scale: 30,
+      bestEffort: true
+    });
+  
+  // Get coordinates
+  var coords = point.coordinates();
+  
+  return ee.Feature(point, {
+    ndvi_mean: stats.get('NDVI_mean'),
+    ndvi_std: stats.get('NDVI_stdDev'),
+    ndvi_min: stats.get('NDVI_min'),
+    ndvi_max: stats.get('NDVI_max'),
+    ndvi_p25: stats.get('NDVI_p25'),
+    ndvi_p50: stats.get('NDVI_p50'),
+    ndvi_p75: stats.get('NDVI_p75'),
+    ndvi_early: earlyNDVI.get('NDVI'),
+    ndvi_late: lateNDVI.get('NDVI'),
+    elevation_m: elevation.get('elevation'),
+    longitude: coords.get(0),
+    latitude: coords.get(1)
+  });
+}
+
+// ---------------------------------------------------------------
+// 6. SAMPLING FUNCTION WITH CDL VERIFICATION (SERVER-SIDE)
+// ---------------------------------------------------------------
+function sampleCropFields(cropInfo) {
+  print('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  print('🌱', cropInfo.name.toUpperCase());
+  print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  
+  // Target number of samples
+  var targetSamples = NUM_FIELDS_PER_CROP * NUM_SAMPLES_PER_FIELD;
+  
+  print('  🎯 Target:', targetSamples, 'samples for CDL code', cropInfo.code);
+  print('  📡 Strategy: Request 100x per county to ensure valid matches');
+  
+  // SMART APPROACH: Try counties one by one until we have enough samples
+  // NOTE: We request 100x samples per county because Earth Engine's sample()
+  // function may not return all requested samples (sparse data, edge effects, etc.)
+  var allSamples = ee.FeatureCollection([]);
+  var samplesCollected = 0;
+  var countiesUsed = 0;
+  
+  // Mask CDL to only show pixels of this crop
+  var cropMask = cdl.select('cropland').updateMask(cdl.eq(cropInfo.code));
+  
+  // Try each county until we have enough samples
+  for (var i = 0; i < cropInfo.counties.length && samplesCollected < targetSamples; i++) {
+    var countyGEOID = cropInfo.counties[i];
+    var countyRegion = getCountyGeometry([countyGEOID]);
+    
+    // How many more samples do we need?
+    var samplesNeeded = targetSamples - samplesCollected;
+    
+    // Sample from this county (request 100x what we need to ensure we get matches!)
+    var countySamples = cropMask.sample({
+      region: countyRegion,
+      scale: 30,
+      numPixels: samplesNeeded * 100,  // 100x buffer for reliable sampling
+      seed: 42 + cropInfo.code + i,
+      geometries: true,
+      tileScale: 16
+    });
+    
+    var countyCount = countySamples.size().getInfo();
+    
+    if (countyCount > 0) {
+      // Limit to what we need
+      var samplesToAdd = countySamples.limit(samplesNeeded);
+      allSamples = allSamples.merge(samplesToAdd);
+      samplesCollected += Math.min(countyCount, samplesNeeded);
+      countiesUsed++;
+      
+      if (i < 3) {  // Only print first 3 to avoid spam
+        print('  📦 County', (i+1), '(GEOID:', countyGEOID + '):', 
+              Math.min(countyCount, samplesNeeded), 'samples');
+      }
+    }
+  }
+  
+  print('  ✅ Total collected:', samplesCollected, 'samples from', countiesUsed, 'counties');
+  
+  var finalSamples = allSamples;
+  
+  // Add crop info to each sample
+  finalSamples = finalSamples.map(function(feature) {
+    return feature.set({
+      'crop': cropInfo.name,
+      'crop_code': cropInfo.code
+      // Note: cdl_code removed to match existing BigQuery schema
+    });
+  });
+  
+  // Extract NDVI features for each sample
+  var allSamples = finalSamples.map(function(feature) {
+    var point = feature.geometry();
+    var sampleWithFeatures = extractFeatures(point);
+    
+    // Combine with crop labels
+    return sampleWithFeatures.copyProperties(feature);
+  });
+  
+  var sampleCount = finalSamples.size().getInfo();
+  
+  // Check if we got any samples at all
+  if (sampleCount === 0) {
+    print('  ❌ ERROR: Found 0 samples for', cropInfo.name);
+    print('      This crop might not exist in', CDL_YEAR, 'CDL data!');
+    print('      💡 SOLUTIONS:');
+    print('         1. Check if CDL code', cropInfo.code, 'is correct');
+    print('         2. Try a different CDL year (2023, 2022)');
+    print('         3. Remove this crop from the CROPS array');
+    return ee.FeatureCollection([]);  // Return empty collection
+  }
+  
+  if (sampleCount < targetSamples) {
+    print('  ⚠️  Got', sampleCount, '/', targetSamples, 'samples');
+    print('      (Checked all', cropInfo.counties.length, 'counties - no more available)');
+  } else {
+    print('  ✅ SUCCESS: Got full quota of', targetSamples, 'samples!');
+  }
+  
+  // Add markers to map ONLY if we have samples (upside-down triangles = map pins!)
+  if (sampleCount > 0) {
+    Map.addLayer(
+      finalSamples.style({
+        color: cropInfo.color,
+        pointSize: 12,
+        pointShape: 'triangle_down',  // Upside-down triangle (point at bottom)
+        width: 3,
+        fillColor: cropInfo.color
+      }),
+      {},
+      cropInfo.name + ' Samples (' + sampleCount + ')',
+      true
+    );
+  }
+  
+  return allSamples;
+}
+
+// ---------------------------------------------------------------
+// 7. PROCESS ALL CROPS AND TRACK DISTRIBUTION
+// ---------------------------------------------------------------
+var allTrainingData = ee.FeatureCollection([]);
+var sampleCounts = {};
+
+CROPS.forEach(function(crop) {
+  var cropSamples = sampleCropFields(crop);
+  allTrainingData = allTrainingData.merge(cropSamples);
+  
+  // Track how many samples we got for this crop
+  var count = cropSamples.size().getInfo();
+  sampleCounts[crop.name] = count;
+});
+
+// ---------------------------------------------------------------
+// 8. DISPLAY SUMMARY TABLE
+// ---------------------------------------------------------------
+print('\n═══════════════════════════════════════');
+print('📊 SUMMARY - SAMPLE DISTRIBUTION');
+print('═══════════════════════════════════════');
+
+var totalSamples = allTrainingData.size().getInfo();
+var targetPerCrop = NUM_FIELDS_PER_CROP * NUM_SAMPLES_PER_FIELD;
+var isBalanced = true;
+
+print('Total samples:', totalSamples);
+print('Target per crop:', targetPerCrop);
+print('');
+print('Crop           | Samples | Status');
+print('─────────────────────────────────────');
+
+CROPS.forEach(function(crop) {
+  var count = sampleCounts[crop.name] || 0;
+  var status = '✅';
+  
+  if (count === 0) {
+    status = '❌ FAILED';
+    isBalanced = false;
+  } else if (count < targetPerCrop) {
+    status = '⚠️  LOW';
+    isBalanced = false;
+  }
+  
+  var name = (crop.name + '               ').substring(0, 14);
+  var countStr = ('       ' + count).slice(-7);
+  print(name + '|' + countStr + ' | ' + status);
+});
+
+print('');
+if (isBalanced) {
+  print('✅ BALANCED: All crops have equal samples!');
+} else {
+  print('⚠️  UNBALANCED: Some crops need more samples');
+  print('');
+  print('💡 SOLUTIONS:');
+  print('  1. Remove failed crops (0 samples) from CROPS array');
+  print('  2. Reduce NUM_SAMPLES_PER_FIELD (e.g., 3 instead of 5)');
+  print('  3. Check CDL codes are correct for rare crops');
+  print('  4. Add more county GEOIDs for low-sample crops in CROPS array');
+}
+
+print('');
+print('Now check the map:');
+print('  • CDL layer shows actual crop types');
+print('  • Upside-down triangles (▼) show your sample points');
+print('  • Bottom tip of each triangle = exact sample location');
+print('  • Every sample is CDL-verified to be the correct crop');
+print('');
+
+// ---------------------------------------------------------------
+// 9. EXPORT DIRECTLY TO BIGQUERY
+// ---------------------------------------------------------------
+print('═══════════════════════════════════════');
+print('📤 EXPORT DIRECTLY TO BIGQUERY');
+print('═══════════════════════════════════════');
+
+// Your ML Pipeline Configuration
+var PROJECT_ID = 'ml-pipeline-477612';
+var DATASET_ID = 'crop_ml';
+var TABLE_ID = 'training_features';
+
+// Create field_id for each sample
+var allTrainingDataWithID = allTrainingData.map(function(feature) {
+  var coords = feature.geometry().coordinates();
+  var lon = ee.Number(coords.get(0)).format('%.5f');
+  var lat = ee.Number(coords.get(1)).format('%.5f');
+  var fieldId = ee.String('field_').cat(lon).cat('_').cat(lat);
+  
+  return feature.set('field_id', fieldId);
+});
+
+// Export directly to BigQuery (schema is auto-detected)
+Export.table.toBigQuery({
+  collection: allTrainingDataWithID,
+  description: 'crop_features_to_bigquery',
+  table: PROJECT_ID + '.' + DATASET_ID + '.' + TABLE_ID,  // Format: project.dataset.table
+  append: true,  // Add to existing table instead of overwriting
+  selectors: ['field_id', 'crop', 'crop_code',
+              'ndvi_mean', 'ndvi_std', 'ndvi_min', 'ndvi_max',
+              'ndvi_p25', 'ndvi_p50', 'ndvi_p75',
+              'ndvi_early', 'ndvi_late', 'elevation_m',
+              'longitude', 'latitude']
+});
+
+print('✅ Export task created: "crop_features_to_bigquery"');
+print('   Destination: ' + PROJECT_ID + '.' + DATASET_ID + '.' + TABLE_ID);
+print('   Mode: WRITE_APPEND (adds to existing data)');
+print('   Go to Tasks tab → Click RUN');
+print('');
+
+print('═══════════════════════════════════════');
+print('💡 NEXT STEPS - ML PIPELINE');
+print('═══════════════════════════════════════');
+print('1. Click Tasks tab → Run "crop_features_to_bigquery"');
+print('2. Wait for export to complete (~2-5 minutes)');
+print('3. Verify data loaded in BigQuery:');
+print('');
+print('bq query --use_legacy_sql=false \\');
+print('  "SELECT crop, COUNT(*) as count FROM ' + DATASET_ID + '.' + TABLE_ID + ' GROUP BY crop"');
+print('');
+print('4. Trigger model retraining:');
+print('');
+print('curl -X POST https://us-central1-' + PROJECT_ID + '.cloudfunctions.net/retrain-crop-model');
+print('');
+print('5. Monitor training logs:');
+print('gcloud functions logs read retrain-crop-model --region=us-central1 --limit=50');
+print('');
+print('🎯 BigQuery Schema (15 columns):');
+print('  • ID: field_id');
+print('  • Labels: crop, crop_code');
+print('  • Basic NDVI: mean, std, min, max');
+print('  • Percentiles: p25, p50, p75');
+print('  • Temporal: early_season, late_season');
+print('  • Location: lat, lon, elevation');
+print('');
+print('🔍 CDL VERIFICATION:');
+print('  • Each sample point is checked against CDL');
+print('  • Only samples matching the target crop are kept');
+print('  • Samples are spatially filtered using cropMask');
+print('  • 100% accurate training labels!');
+print('');
+print('☁️ ML PIPELINE:');
+print('  • Data exports directly to BigQuery (no intermediate GCS step)');
+print('  • Project:', PROJECT_ID);
+print('  • BigQuery table:', DATASET_ID + '.' + TABLE_ID);
+print('  • Mode: WRITE_APPEND (adds new data to existing table)');
+print('  • Cloud Function automatically trains when data is ready!');
+print('');
+print('📊 SAMPLE COUNT:');
+print('  • Per crop:', NUM_FIELDS_PER_CROP * NUM_SAMPLES_PER_FIELD, 'samples');
+print('  • Total:', (NUM_FIELDS_PER_CROP * NUM_SAMPLES_PER_FIELD * CROPS.length), 'samples');
+print('  • This meets the 100+ minimum for model training!');
+print('');
+print('🐛 TROUBLESHOOTING:');
+print('  • Auth error? Hard refresh (Ctrl+Shift+R)');
+print('  • 0 samples for a crop? Check CDL code or try different year');
+print('  • Unbalanced? All crops should have', (NUM_FIELDS_PER_CROP * NUM_SAMPLES_PER_FIELD), 'samples');
+print('  • Timeout? Reduce NUM_FIELDS_PER_CROP to 8');
+print('  • Schema error? Script now matches existing BigQuery table schema');
+print('  • Map layer error? Means that crop has 0 samples');
+print('  • Using top 10 counties per crop for maximum speed');

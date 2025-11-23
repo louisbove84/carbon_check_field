@@ -105,36 +105,80 @@ class _MapScreenState extends State<MapScreen> {
             child: MapInstructions(),
           ),
           
-          // Area display card (bottom)
-          if (_polygonPoints.isNotEmpty)
-            Positioned(
-              bottom: 16,
-              left: 16,
-              right: 16,
-              child: AreaDisplayCard(
-                areaAcres: _areaAcres,
-                pointCount: _polygonPoints.length,
-              ),
+          // Bottom bar with area info and analyze button (always visible)
+          Positioned(
+            bottom: 16,
+            left: 16,
+            right: 16,
+            child: Row(
+              children: [
+                // Area display card on the left
+                Expanded(
+                  flex: 3,
+                  child: _polygonPoints.isNotEmpty
+                      ? AreaDisplayCard(
+                          areaAcres: _areaAcres,
+                          pointCount: _polygonPoints.length,
+                        )
+                      : Card(
+                          elevation: 8,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 12.0, vertical: 20.0),
+                            child: Center(
+                              child: Text(
+                                'Tap to draw',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                ),
+                
+                const SizedBox(width: 12),
+                
+                // Analyze button on the right (always visible, disabled until ready)
+                Expanded(
+                  flex: 2,
+                  child: ElevatedButton(
+                    onPressed: _canAnalyze ? _analyzeField : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _canAnalyze ? const Color(0xFF1976D2) : Colors.grey[300],
+                      foregroundColor: _canAnalyze ? Colors.white : Colors.grey[500],
+                      padding: const EdgeInsets.symmetric(vertical: 20),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      elevation: _canAnalyze ? 8 : 2,
+                      disabledBackgroundColor: Colors.grey[300],
+                      disabledForegroundColor: Colors.grey[500],
+                    ),
+                    child: const Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.analytics, size: 28),
+                        SizedBox(height: 4),
+                        Text(
+                          'Analyze',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
+          ),
         ],
       ),
-      
-      // Floating action button - Analyze field
-      floatingActionButton: _canAnalyze
-          ? FloatingActionButton.extended(
-              onPressed: _analyzeField,
-              backgroundColor: const Color(0xFF1976D2),
-              icon: const Icon(Icons.analytics),
-              label: const Text(
-                'Analyze Field',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            )
-          : null,
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
   }
 

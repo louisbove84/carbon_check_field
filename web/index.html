@@ -32,8 +32,20 @@
   <title>CarbonCheck Field</title>
   <link rel="manifest" href="manifest.json">
   
-  <!-- Google Maps JavaScript API -->
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCAf6KxL_60PsKZlVyBLBPIyD6Rs8df0GA"></script>
+  <!-- Load API key configuration -->
+  <script src="config.js"></script>
+  
+  <!-- Google Maps JavaScript API (key loaded from config.js) -->
+  <script>
+    // Load Google Maps API with key from config.js
+    if (typeof GOOGLE_MAPS_API_KEY !== 'undefined') {
+      const script = document.createElement('script');
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}`;
+      document.head.appendChild(script);
+    } else {
+      console.error('GOOGLE_MAPS_API_KEY not found in config.js');
+    }
+  </script>
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>

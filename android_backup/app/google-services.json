@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "294296572688",
+    "project_id": "carbon-check-field",
+    "storage_bucket": "carbon-check-field.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:294296572688:android:71c703aca37d792f868b95",
+        "android_client_info": {
+          "package_name": "com.carboncheck.field"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC_xjOKRaR79-PEUbv0ojHRpsZg5YkRUFE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
