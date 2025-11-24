@@ -10,6 +10,7 @@ import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:carbon_check_field/models/field_data.dart';
 import 'package:carbon_check_field/models/prediction_result.dart';
+import 'package:carbon_check_field/models/crop_zone.dart';
 
 class BackendService {
   /// Cloud Run backend URL
@@ -134,11 +135,21 @@ class BackendService {
   }
 
   /// Parse analysis response from backend
+  /// 
+  /// Handles both formats:
+  /// - Single prediction (small fields < 10 acres)
+  /// - Grid-based (larger fields >= 10 acres)
   PredictionResult _parseAnalysisResponse(
     Map<String, dynamic> response,
     double areaAcres,
   ) {
     try {
+      // Check if this is a grid-based response (new format)
+      if (response.containsKey('crop_zones') && response['crop_zones'] != null) {
+        return _parseGridResponse(response);
+      }
+      
+      // Otherwise, parse as single prediction (legacy format)
       return PredictionResult(
         cropType: response['crop'] as String,
         confidence: (response['confidence'] as num).toDouble(),
@@ -152,6 +163,63 @@ class BackendService {
       );
     } catch (e) {
       throw Exception('Failed to parse analysis response: $e');
+    }
+  }
+  
+  /// Parse grid-based response (for fields >= 10 acres)
+  /// 
+  /// Includes all crop zones for map visualization
+  PredictionResult _parseGridResponse(Map<String, dynamic> response) {
+    try {
+      final fieldSummary = response['field_summary'] as Map<String, dynamic>;
+      final cropZonesJson = response['crop_zones'] as List<dynamic>;
+      final co2Income = response['co2_income'] as Map<String, dynamic>;
+      
+      // Parse crop zones
+      final zones = cropZonesJson
+          .map((z) => CropZone.fromJson(z as Map<String, dynamic>))
+          .toList();
+      
+      // Find dominant crop (largest area)
+      var dominantZone = cropZonesJson.first;
+      double maxArea = 0;
+      for (var zone in cropZonesJson) {
+        final zoneArea = (zone['area_acres'] as num).toDouble();
+        if (zoneArea > maxArea) {
+          maxArea = zoneArea;
+          dominantZone = zone;
+        }
+      }
+      
+      // Calculate weighted average confidence across all zones
+      double totalArea = (fieldSummary['total_area_acres'] as num).toDouble();
+      double weightedConfidence = 0;
+      for (var zone in cropZonesJson) {
+        final confidence = (zone['confidence'] as num).toDouble();
+        final percentage = (zone['percentage'] as num).toDouble();
+        weightedConfidence += confidence * (percentage / 100);
+      }
+      
+      // Count distinct crops
+      final distinctCrops = zones.map((z) => z.crop).toSet().length;
+      final cropSummary = distinctCrops == 1
+          ? dominantZone['crop']
+          : '$distinctCrops crop types detected';
+      
+      return PredictionResult(
+        cropType: cropSummary,
+        confidence: weightedConfidence,
+        cdlCropType: null,  // Not available for grid analysis
+        cdlAgreement: false,
+        areaAcres: totalArea,
+        carbonIncomeMin: (co2Income['total_min'] as num).toDouble(),
+        carbonIncomeMax: (co2Income['total_max'] as num).toDouble(),
+        carbonIncomeAverage: (co2Income['total_avg'] as num).toDouble(),
+        predictedAt: DateTime.now(),
+        cropZones: zones,  // Include zones for visualization
+      );
+    } catch (e) {
+      throw Exception('Failed to parse grid response: $e');
     }
   }
 

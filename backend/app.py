@@ -17,7 +17,7 @@ Author: CarbonCheck Team
 from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 import ee
 from google.cloud import aiplatform
 from google.auth.transport import requests
@@ -25,6 +25,10 @@ from google.oauth2 import id_token
 import uvicorn
 import os
 from datetime import datetime
+import math
+import numpy as np
+from shapely.geometry import Polygon, Point, box
+from shapely.ops import unary_union
 
 # Initialize FastAPI
 app = FastAPI(
@@ -85,18 +89,56 @@ class AnalyzeFieldRequest(BaseModel):
     year: Optional[int] = Field(2024, ge=2015, le=2030)
 
 
-class AnalyzeFieldResponse(BaseModel):
-    """Analysis results with crop prediction and CO₂ income"""
+class CropZone(BaseModel):
+    """Individual crop zone within a field"""
     crop: str
     confidence: float
+    area_acres: float
+    percentage: float
+    polygon: List[List[float]]  # [[lng, lat], ...]
+
+
+class CO2IncomeByCrop(BaseModel):
+    """CO₂ income breakdown by crop type"""
+    crop: str
+    min: float
+    max: float
+    avg: float
+
+
+class CO2IncomeTotal(BaseModel):
+    """Total CO₂ income across all crop zones"""
+    total_min: float
+    total_max: float
+    total_avg: float
+    by_crop: List[CO2IncomeByCrop]
+
+
+class FieldSummary(BaseModel):
+    """Summary of field analysis"""
+    total_area_acres: float
+    grid_cell_size_meters: Optional[int] = None
+    total_cells: Optional[int] = None
+
+
+class AnalyzeFieldResponse(BaseModel):
+    """Analysis results with crop prediction and CO₂ income"""
+    # Legacy fields for backward compatibility (single prediction)
+    crop: Optional[str] = None
+    confidence: Optional[float] = None
     cdl_crop: Optional[str] = None  # CDL ground truth crop type
-    cdl_agreement: bool = False  # Whether model and CDL agree
+    cdl_agreement: Optional[bool] = False  # Whether model and CDL agree
     area_acres: float
     co2_income_min: float
     co2_income_max: float
     co2_income_avg: float
-    features: List[float]
+    features: Optional[List[float]] = None
     timestamp: str
+    
+    # New grid-based fields
+    field_summary: Optional[FieldSummary] = None
+    crop_zones: Optional[List[CropZone]] = None
+    co2_income: Optional[CO2IncomeTotal] = None
 
 
 # ============================================================================
@@ -474,6 +516,168 @@ def calculate_carbon_income(crop: str, area_acres: float) -> dict:
 
 
 # ============================================================================
+# GRID-BASED CLASSIFICATION
+# ============================================================================
+
+import math
+import numpy as np
+from shapely.geometry import Polygon, Point, box
+from shapely.ops import unary_union
+
+MAX_FIELD_SIZE_ACRES = 2000
+MIN_FIELD_SIZE_FOR_GRID = 10  # Use grid for fields >= 10 acres (larger fields only)
+MAX_GRID_CELLS = 25  # Reduced to 25 for faster processing
+PRACTICAL_CELL_SIZES = [50, 100, 200, 300, 500]  # meters (larger cells for speed)
+
+
+def calculate_optimal_grid_size(area_acres: float) -> Tuple[int, int]:
+    """
+    Calculate optimal grid cell size to target max cells.
+    Conservative settings for faster processing.
+    
+    Args:
+        area_acres: Field area in acres
+    
+    Returns:
+        Tuple of (cell_size_meters, estimated_cell_count)
+    """
+    # Convert acres to square meters
+    area_m2 = area_acres * 4046.86
+    
+    # Target cell area for MAX_GRID_CELLS
+    target_cell_area = area_m2 / MAX_GRID_CELLS
+    
+    # Cell size (square cells)
+    cell_size = math.sqrt(target_cell_area)
+    
+    # Round to nearest practical size
+    cell_size = min(PRACTICAL_CELL_SIZES, key=lambda x: abs(x - cell_size))
+    
+    # Ensure within bounds (larger cells for speed)
+    cell_size = max(50, min(500, cell_size))
+    
+    # Estimate actual cell count (with 20% buffer for irregular shapes)
+    estimated_cells = int(area_m2 / (cell_size * cell_size) * 1.2)
+    
+    # If still too many cells, increase size
+    while estimated_cells > MAX_GRID_CELLS and cell_size < 300:
+        # Find next larger size
+        idx = PRACTICAL_CELL_SIZES.index(cell_size)
+        if idx < len(PRACTICAL_CELL_SIZES) - 1:
+            cell_size = PRACTICAL_CELL_SIZES[idx + 1]
+            estimated_cells = int(area_m2 / (cell_size * cell_size) * 1.2)
+        else:
+            break
+    
+    return cell_size, estimated_cells
+
+
+def generate_grid_cells(coords: List[Tuple[float, float]], cell_size_meters: int) -> List[Polygon]:
+    """
+    Generate grid cells over the polygon.
+    
+    Args:
+        coords: List of (lng, lat) tuples forming polygon
+        cell_size_meters: Size of each grid cell in meters
+    
+    Returns:
+        List of Shapely Polygon objects representing grid cells
+    """
+    # Create polygon and fix any invalid geometries (self-intersections, etc.)
+    poly = Polygon(coords)
+    if not poly.is_valid:
+        print(f"⚠️  Invalid polygon detected (self-intersection), attempting to fix...")
+        poly = poly.buffer(0)  # Fix self-intersections and invalid geometries
+        if not poly.is_valid:
+            raise ValueError("Polygon is invalid and cannot be fixed automatically. Please redraw the field boundary without crossing edges.")
+    
+    # Get bounding box
+    minx, miny, maxx, maxy = poly.bounds
+    
+    # Convert cell size from meters to degrees (approximate)
+    # At equator: 1 degree ≈ 111,320 meters
+    # This is approximate; more accurate conversion would use projection
+    lat_center = (miny + maxy) / 2
+    cell_size_lng = cell_size_meters / (111320 * math.cos(math.radians(lat_center)))
+    cell_size_lat = cell_size_meters / 111320
+    
+    # Generate grid
+    cells = []
+    lng = minx
+    while lng < maxx:
+        lat = miny
+        while lat < maxy:
+            # Create cell polygon
+            cell = box(lng, lat, lng + cell_size_lng, lat + cell_size_lat)
+            
+            # Check if cell intersects field (>50% coverage)
+            intersection = cell.intersection(poly)
+            if intersection.area > 0:
+                coverage = intersection.area / cell.area
+                if coverage > 0.5:
+                    cells.append(cell)
+            
+            lat += cell_size_lat
+        lng += cell_size_lng
+    
+    return cells
+
+
+def group_adjacent_cells(cells: List[Dict], threshold_distance: float = 0.001) -> List[Dict]:
+    """
+    Group adjacent cells with the same crop type.
+    
+    Args:
+        cells: List of cell dicts with 'crop', 'confidence', 'polygon'
+        threshold_distance: Distance threshold for adjacency (degrees)
+    
+    Returns:
+        List of grouped crop zones
+    """
+    if not cells:
+        return []
+    
+    # Group by crop type
+    crops = {}
+    for cell in cells:
+        crop = cell['crop']
+        if crop not in crops:
+            crops[crop] = []
+        crops[crop].append(cell)
+    
+    # For each crop, merge adjacent polygons
+    zones = []
+    for crop, crop_cells in crops.items():
+        # Convert to Shapely polygons
+        polygons = [Polygon(cell['polygon']) for cell in crop_cells]
+        
+        # Merge all polygons for this crop
+        merged = unary_union(polygons)
+        
+        # Calculate total area and average confidence
+        total_area_m2 = sum(Polygon(cell['polygon']).area * 111320 * 111320 for cell in crop_cells)
+        total_area_acres = total_area_m2 * 0.000247105
+        avg_confidence = sum(cell['confidence'] for cell in crop_cells) / len(crop_cells)
+        
+        # Extract coordinates from merged polygon
+        if hasattr(merged, 'geoms'):  # MultiPolygon
+            # If fragmented, take the largest polygon
+            largest = max(merged.geoms, key=lambda p: p.area)
+            coords = list(largest.exterior.coords)
+        else:  # Polygon
+            coords = list(merged.exterior.coords)
+        
+        zones.append({
+            'crop': crop,
+            'confidence': avg_confidence,
+            'area_acres': total_area_acres,
+            'polygon': coords
+        })
+    
+    return zones
+
+
+# ============================================================================
 # API ENDPOINTS
 # ============================================================================
 
@@ -508,16 +712,18 @@ async def analyze_field(
     """
     Analyze a farm field and return crop prediction + CO₂ income estimate.
     
+    Uses grid-based classification for fields >= 2 acres to detect multiple crop types.
+    Small fields (< 2 acres) use single prediction for speed.
+    
     Requires:
     - Authorization header with Firebase ID token
     - Polygon coordinates (3-100 points)
     - Optional year (default: 2024)
     
     Returns:
-    - Crop type and confidence
+    - Crop type and confidence (or multiple crop zones for large fields)
     - Area in acres
     - CO₂ income estimates (min, max, avg)
-    - 17 computed NDVI features
     """
     try:
         # Convert polygon to (lng, lat) tuples
@@ -526,60 +732,192 @@ async def analyze_field(
         # Calculate area
         area_acres = calculate_polygon_area_acres(coords)
         
+        # Validate field size
         if area_acres < 0.1:
             raise HTTPException(status_code=400, detail="Field is too small (minimum 0.1 acres)")
         
-        if area_acres > 10000:
-            raise HTTPException(status_code=400, detail="Field is too large (maximum 10,000 acres)")
+        if area_acres > MAX_FIELD_SIZE_ACRES:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Field too large ({area_acres:.1f} acres). "
+                       f"Maximum size is {MAX_FIELD_SIZE_ACRES} acres (about 3 square miles). "
+                       f"Please draw a smaller area or split into multiple fields."
+            )
         
-        # Compute NDVI features via Earth Engine
-        print(f"Computing NDVI features for {area_acres:.1f} acre field...")
-        features = compute_ndvi_features(coords, request.year)
-        
-        # Predict crop type via Vertex AI
-        print("Predicting crop type...")
-        crop, confidence = predict_crop_type(features)
-        
-        # Get CDL ground truth crop type
-        print("Fetching CDL ground truth...")
-        cdl_crop = get_cdl_crop_type(coords, request.year)
-        
-        # Check if model and CDL agree
-        cdl_agreement = False
-        if cdl_crop:
-            # Normalize crop names for comparison (handle variations)
-            crop_normalized = crop.lower().replace(" ", "")
-            cdl_normalized = cdl_crop.lower().replace(" ", "")
-            cdl_agreement = crop_normalized == cdl_normalized
-        
-        # Calculate carbon income
-        income = calculate_carbon_income(crop, area_acres)
-        
-        # Build response
-        response = AnalyzeFieldResponse(
-            crop=crop,
-            confidence=confidence,
-            cdl_crop=cdl_crop,
-            cdl_agreement=cdl_agreement,
-            area_acres=round(area_acres, 2),
-            co2_income_min=round(income["min"], 2),
-            co2_income_max=round(income["max"], 2),
-            co2_income_avg=round(income["avg"], 2),
-            features=features,
-            timestamp=datetime.utcnow().isoformat()
-        )
-        
-        cdl_status = f"CDL: {cdl_crop}" if cdl_crop else "CDL: N/A"
-        agreement_icon = "✅" if cdl_agreement else "⚠️"
-        print(f"{agreement_icon} Analysis complete: Model={crop} ({confidence:.0%}), {cdl_status}, ${income['avg']:.0f}/year")
-        
-        return response
+        # Choose analysis method based on field size
+        if area_acres < MIN_FIELD_SIZE_FOR_GRID:
+            # Small field: use single prediction (fast)
+            return await analyze_field_single(coords, area_acres, request.year)
+        else:
+            # Large field: use grid-based classification (detailed)
+            return await analyze_field_grid(coords, area_acres, request.year)
+
     
     except HTTPException:
         raise
     except Exception as e:
         print(f"Error in analyze_field: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def analyze_field_single(coords: List[Tuple[float, float]], area_acres: float, year: int) -> AnalyzeFieldResponse:
+    """
+    Single prediction for small fields (< 2 acres).
+    Uses existing logic for backward compatibility.
+    """
+    print(f"Single prediction mode for {area_acres:.1f} acre field...")
+    
+    # Compute NDVI features via Earth Engine
+    features = compute_ndvi_features(coords, year)
+    
+    # Predict crop type via Vertex AI
+    crop, confidence = predict_crop_type(features)
+    
+    # Get CDL ground truth crop type
+    cdl_crop = get_cdl_crop_type(coords, year)
+    
+    # Check if model and CDL agree
+    cdl_agreement = False
+    if cdl_crop:
+        crop_normalized = crop.lower().replace(" ", "")
+        cdl_normalized = cdl_crop.lower().replace(" ", "")
+        cdl_agreement = crop_normalized == cdl_normalized
+    
+    # Calculate carbon income
+    income = calculate_carbon_income(crop, area_acres)
+    
+    # Build response (legacy format)
+    response = AnalyzeFieldResponse(
+        crop=crop,
+        confidence=confidence,
+        cdl_crop=cdl_crop,
+        cdl_agreement=cdl_agreement,
+        area_acres=round(area_acres, 2),
+        co2_income_min=round(income["min"], 2),
+        co2_income_max=round(income["max"], 2),
+        co2_income_avg=round(income["avg"], 2),
+        features=features,
+        timestamp=datetime.utcnow().isoformat()
+    )
+    
+    print(f"✅ Single prediction: {crop} ({confidence:.0%}), ${income['avg']:.0f}/year")
+    
+    return response
+
+
+async def analyze_field_grid(coords: List[Tuple[float, float]], area_acres: float, year: int) -> AnalyzeFieldResponse:
+    """
+    Grid-based classification for larger fields (>= 2 acres).
+    Detects multiple crop types within the field.
+    """
+    print(f"Grid-based classification for {area_acres:.1f} acre field...")
+    
+    # Calculate optimal grid size
+    cell_size_meters, estimated_cells = calculate_optimal_grid_size(area_acres)
+    print(f"Using {cell_size_meters}m grid cells (estimated: {estimated_cells} cells)")
+    
+    # Generate grid
+    cells = generate_grid_cells(coords, cell_size_meters)
+    print(f"Generated {len(cells)} grid cells")
+    
+    if len(cells) == 0:
+        raise HTTPException(status_code=500, detail="Failed to generate grid cells")
+    
+    # Process each cell (batch NDVI + batch predictions)
+    cell_results = []
+    
+    # Batch process cells in groups of 10 for efficiency
+    batch_size = 10
+    for i in range(0, len(cells), batch_size):
+        batch = cells[i:i+batch_size]
+        
+        for cell in batch:
+            try:
+                # Get cell coordinates
+                cell_coords = list(cell.exterior.coords)
+                
+                # Compute NDVI features for this cell
+                features = compute_ndvi_features(cell_coords, year)
+                
+                # Predict crop type for this cell
+                crop, confidence = predict_crop_type(features)
+                
+                cell_results.append({
+                    'crop': crop,
+                    'confidence': confidence,
+                    'polygon': cell_coords
+                })
+            except Exception as e:
+                print(f"Warning: Cell processing failed: {e}")
+                # Skip failed cells
+                continue
+    
+    if not cell_results:
+        raise HTTPException(status_code=500, detail="All grid cells failed processing")
+    
+    print(f"Processed {len(cell_results)}/{len(cells)} cells successfully")
+    
+    # Group adjacent cells by crop type
+    zones = group_adjacent_cells(cell_results)
+    print(f"Grouped into {len(zones)} crop zones")
+    
+    # Calculate total area and percentages
+    total_area = sum(zone['area_acres'] for zone in zones)
+    for zone in zones:
+        zone['percentage'] = (zone['area_acres'] / total_area) * 100 if total_area > 0 else 0
+    
+    # Calculate CO₂ income by crop
+    co2_by_crop = []
+    total_co2_min = 0
+    total_co2_max = 0
+    total_co2_avg = 0
+    
+    for zone in zones:
+        income = calculate_carbon_income(zone['crop'], zone['area_acres'])
+        co2_by_crop.append(CO2IncomeByCrop(
+            crop=zone['crop'],
+            min=round(income['min'], 2),
+            max=round(income['max'], 2),
+            avg=round(income['avg'], 2)
+        ))
+        total_co2_min += income['min']
+        total_co2_max += income['max']
+        total_co2_avg += income['avg']
+    
+    # Build response (grid format)
+    response = AnalyzeFieldResponse(
+        area_acres=round(total_area, 2),
+        co2_income_min=round(total_co2_min, 2),
+        co2_income_max=round(total_co2_max, 2),
+        co2_income_avg=round(total_co2_avg, 2),
+        timestamp=datetime.utcnow().isoformat(),
+        field_summary=FieldSummary(
+            total_area_acres=round(total_area, 2),
+            grid_cell_size_meters=cell_size_meters,
+            total_cells=len(cell_results)
+        ),
+        crop_zones=[CropZone(
+            crop=zone['crop'],
+            confidence=round(zone['confidence'], 3),
+            area_acres=round(zone['area_acres'], 2),
+            percentage=round(zone['percentage'], 1),
+            polygon=zone['polygon']
+        ) for zone in zones],
+        co2_income=CO2IncomeTotal(
+            total_min=round(total_co2_min, 2),
+            total_max=round(total_co2_max, 2),
+            total_avg=round(total_co2_avg, 2),
+            by_crop=co2_by_crop
+        )
+    )
+    
+    # Print summary
+    print(f"✅ Grid analysis complete:")
+    for zone in zones:
+        print(f"   - {zone['crop']}: {zone['area_acres']:.1f} acres ({zone['percentage']:.0f}%)")
+    print(f"   Total income: ${total_co2_avg:.0f}/year")
+    
+    return response
 
 
 # ============================================================================

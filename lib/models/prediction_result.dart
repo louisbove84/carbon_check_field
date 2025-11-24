@@ -1,5 +1,7 @@
 /// Data model for crop prediction results and carbon credit estimates
 
+import 'crop_zone.dart';
+
 /// Contains the predicted crop type, confidence, and financial projections
 class PredictionResult {
   /// Predicted crop type (e.g., "Corn", "Soybeans")
@@ -28,6 +30,18 @@ class PredictionResult {
   
   /// Timestamp of prediction
   final DateTime predictedAt;
+  
+  /// Crop zones (for grid-based classification of larger fields)
+  final List<CropZone>? cropZones;
+  
+  /// Whether this result has multiple crop zones
+  bool get hasMultipleZones => cropZones != null && cropZones!.isNotEmpty;
+  
+  /// Number of distinct crop types detected
+  int get distinctCropCount {
+    if (cropZones == null) return 1;
+    return cropZones!.map((z) => z.crop).toSet().length;
+  }
 
   PredictionResult({
     required this.cropType,
@@ -39,6 +53,7 @@ class PredictionResult {
     required this.carbonIncomeMax,
     required this.carbonIncomeAverage,
     required this.predictedAt,
+    this.cropZones,
   });
 
   /// Format confidence as percentage string
@@ -84,11 +99,19 @@ Analyzed on ${predictedAt.toString().split(' ')[0]}
       'carbonIncomeMax': carbonIncomeMax,
       'carbonIncomeAverage': carbonIncomeAverage,
       'predictedAt': predictedAt.toIso8601String(),
+      'cropZones': cropZones?.map((z) => z.toJson()).toList(),
     };
   }
 
   /// Create from JSON
   factory PredictionResult.fromJson(Map<String, dynamic> json) {
+    List<CropZone>? zones;
+    if (json['cropZones'] != null) {
+      zones = (json['cropZones'] as List<dynamic>)
+          .map((z) => CropZone.fromJson(z as Map<String, dynamic>))
+          .toList();
+    }
+    
     return PredictionResult(
       cropType: json['cropType'] as String,
       confidence: json['confidence'] as double,
@@ -99,6 +122,7 @@ Analyzed on ${predictedAt.toString().split(' ')[0]}
       carbonIncomeMax: json['carbonIncomeMax'] as double,
       carbonIncomeAverage: json['carbonIncomeAverage'] as double,
       predictedAt: DateTime.parse(json['predictedAt'] as String),
+      cropZones: zones,
     );
   }
 }

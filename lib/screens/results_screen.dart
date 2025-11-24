@@ -12,6 +12,7 @@ import 'package:carbon_check_field/services/backend_service.dart';
 import 'package:carbon_check_field/services/firebase_service.dart';
 import 'package:carbon_check_field/widgets/loading_overlay.dart';
 import 'package:carbon_check_field/widgets/result_card.dart';
+import 'package:carbon_check_field/screens/crop_zones_map_screen.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -213,6 +214,35 @@ class _ResultsScreenState extends State<ResultsScreen> {
             
             const SizedBox(height: 24),
             
+            // Show crop zones button (only for multi-zone results)
+            if (_result!.hasMultipleZones)
+              Column(
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: _showCropZonesMap,
+                    icon: const Icon(Icons.map),
+                    label: Text('View ${_result!.distinctCropCount} Crop Zones on Map'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2E7D32),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                      minimumSize: const Size(double.infinity, 50),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Tap to see how your field was divided into crop zones',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[600],
+                      fontStyle: FontStyle.italic,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24),
+                ],
+              ),
+            
             // Action buttons
             Row(
               children: [
@@ -251,6 +281,21 @@ class _ResultsScreenState extends State<ResultsScreen> {
   void _shareResults() {
     if (_result != null) {
       Share.share(_result!.shareableText);
+    }
+  }
+  
+  /// Show crop zones on interactive map
+  void _showCropZonesMap() {
+    if (_result != null && _result!.hasMultipleZones) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => CropZonesMapScreen(
+            result: _result!,
+            fieldBoundary: widget.fieldData.polygonPoints,
+          ),
+        ),
+      );
     }
   }
 }
