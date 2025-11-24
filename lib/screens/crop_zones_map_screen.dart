@@ -50,12 +50,12 @@ class _CropZonesMapScreenState extends State<CropZonesMapScreen> {
   void _buildPolygons() {
     final polygons = <Polygon>{};
     
-    // Add field boundary (outline only)
+    // Add field boundary (outline only - red for visibility)
     polygons.add(Polygon(
       polygonId: const PolygonId('field_boundary'),
       points: widget.fieldBoundary,
-      strokeColor: Colors.black,
-      strokeWidth: 3,
+      strokeColor: Colors.red,
+      strokeWidth: 4,
       fillColor: Colors.transparent,
       consumeTapEvents: false,
     ));

@@ -194,85 +194,77 @@ class _ResultsScreenState extends State<ResultsScreen> {
 
   /// Results view with prediction and CO₂ income
   Widget _buildResultsView() {
-    return SingleChildScrollView(
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Success icon
-            const Icon(
-              Icons.check_circle,
-              size: 80,
-              color: Colors.green,
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Success icon (smaller)
+          const Icon(
+            Icons.check_circle,
+            size: 50,
+            color: Colors.green,
+          ),
+          
+          const SizedBox(height: 12),
+          
+          // Results card (flexible to take available space)
+          Expanded(
+            child: SingleChildScrollView(
+              child: ResultCard(result: _result!),
             ),
-            
-            const SizedBox(height: 24),
-            
-            // Results card
-            ResultCard(result: _result!),
-            
-            const SizedBox(height: 24),
-            
-            // Show crop zones button (only for multi-zone results)
-            if (_result!.hasMultipleZones)
-              Column(
-                children: [
-                  ElevatedButton.icon(
-                    onPressed: _showCropZonesMap,
-                    icon: const Icon(Icons.map),
-                    label: Text('View ${_result!.distinctCropCount} Crop Zones on Map'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2E7D32),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                      minimumSize: const Size(double.infinity, 50),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Tap to see how your field was divided into crop zones',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                      fontStyle: FontStyle.italic,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 24),
-                ],
-              ),
-            
-            // Action buttons
-            Row(
+          ),
+          
+          const SizedBox(height: 12),
+          
+          // Show crop zones button (only for multi-zone results)
+          if (_result!.hasMultipleZones)
+            Column(
               children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.arrow_back),
-                    label: const Text('New Field'),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                    ),
+                ElevatedButton.icon(
+                  onPressed: _showCropZonesMap,
+                  icon: const Icon(Icons.map, size: 20),
+                  label: Text('View ${_result!.distinctCropCount} Crop Zones'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2E7D32),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                    minimumSize: const Size(double.infinity, 54),
                   ),
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: _shareResults,
-                    icon: const Icon(Icons.share),
-                    label: const Text('Share'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1976D2),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                    ),
-                  ),
-                ),
+                const SizedBox(height: 8),
               ],
             ),
-          ],
-        ),
+          
+          // Action buttons (compact)
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.arrow_back, size: 18),
+                  label: const Text('New Field'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _shareResults,
+                  icon: const Icon(Icons.share, size: 18),
+                  label: const Text('Share'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1976D2),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
