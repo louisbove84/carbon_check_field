@@ -172,18 +172,21 @@ def trigger_training_job():
         logger.info(f"   Triggering custom training job...")
         logger.info(f"   Machine type: {machine_type}")
         
+        # Use regional bucket for Vertex AI (required)
+        vertex_bucket = f'{project_id}-training'
+        
         # Initialize Vertex AI
         aiplatform.init(
             project=project_id, 
             location=region,
-            staging_bucket=f'gs://{bucket_name}'
+            staging_bucket=f'gs://{vertex_bucket}'
         )
         
         # Define custom training job
         job = aiplatform.CustomContainerTrainingJob(
             display_name=f'crop-training-{datetime.now().strftime("%Y%m%d_%H%M")}',
             container_uri=f'{region}-docker.pkg.dev/{project_id}/ml-containers/crop-trainer:latest',
-            staging_bucket=f'gs://{bucket_name}/vertex-staging'
+            staging_bucket=f'gs://{vertex_bucket}/staging'
         )
         
         # Run training job
@@ -192,7 +195,7 @@ def trigger_training_job():
             replica_count=1,
             machine_type=machine_type,
             accelerator_count=0,
-            base_output_dir=f'gs://{bucket_name}/training_output'
+            base_output_dir=f'gs://{vertex_bucket}/training_output'
         )
         
         logger.info("   ✅ Training job complete")
