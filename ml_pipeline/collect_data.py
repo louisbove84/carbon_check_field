@@ -167,12 +167,18 @@ def sample_crop(crop, cdl, ndvi_full, ndvi_early, ndvi_late, samples_needed):
             elev = elevation.reduceRegion(reducer=ee.Reducer.mean(), geometry=point, scale=30)
             coords = point.coordinates()
             
+            # Get all values at once (more efficient)
             values = stats.getInfo()
-            values['ndvi_early'] = early_mean.get('NDVI_mean').getInfo()
-            values['ndvi_late'] = late_mean.get('NDVI_mean').getInfo()
-            values['elevation_m'] = elev.get('elevation').getInfo()
-            values['longitude'] = coords.get(0).getInfo()
-            values['latitude'] = coords.get(1).getInfo()
+            early_info = early_mean.getInfo()
+            late_info = late_mean.getInfo()
+            elev_info = elev.getInfo()
+            coords_info = coords.getInfo()
+            
+            values['ndvi_early'] = early_info.get('NDVI_mean') if early_info else None
+            values['ndvi_late'] = late_info.get('NDVI_mean') if late_info else None  
+            values['elevation_m'] = elev_info.get('elevation') if elev_info else None
+            values['longitude'] = coords_info[0] if coords_info and len(coords_info) > 0 else None
+            values['latitude'] = coords_info[1] if coords_info and len(coords_info) > 1 else None
             values['crop'] = crop['name']
             values['crop_code'] = crop['code']
             values['cdl_code'] = crop['code']
