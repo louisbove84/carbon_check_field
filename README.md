@@ -1,32 +1,16 @@
 # CarbonCheck Field 🌾
 
-A secure Flutter mobile app that helps farmers analyze crop types and estimate carbon credit income by drawing field boundaries on satellite maps.
+A Flutter mobile app that helps farmers analyze crop types and estimate carbon credit income using satellite imagery and AI.
 
-## ✨ Features
+## ✨ Key Features
 
-- **Interactive Field Drawing** - Draw field boundaries by tapping corners on Google Maps satellite view with real-time acreage calculation
-- **Satellite Analysis** - Queries Sentinel-2 imagery and computes 17 NDVI-based features via Earth Engine
-- **AI Crop Classification** - Predicts crop type (Corn, Soybeans, Alfalfa, Winter Wheat) using Vertex AI
-- **CDL Ground Truth** - Shows USDA Cropland Data Layer results alongside model predictions
-- **Address Search** - Quick field location using address lookup
-- **Carbon Credit Estimates** - Real-world 2025 rates from Indigo Ag & Truterra ($10-$25/acre)
-- **Shareable Results** - Export field analysis for sharing
-
-## 🔒 100% Secure Architecture
-
-**No service account keys in the app!** 
-
-- Firebase Authentication (anonymous login)
-- Secure Cloud Run backend with Application Default Credentials
-- No GCP credentials stored in mobile app
-- HTTPS encryption everywhere
-
-```
-Flutter App → Firebase Auth → Cloud Run Backend → Earth Engine + Vertex AI
-(no keys!)                   (secure credentials)
-```
-
----
+- **Interactive Field Drawing** - Draw field boundaries on satellite maps with real-time acreage calculation
+- **Multi-Zone Analysis** - Detects multiple crop zones within large fields (up to 2,000 acres)
+- **AI Crop Classification** - Uses Google Vertex AI to predict crop types (Corn, Soybeans, Alfalfa, Winter Wheat)
+- **Satellite NDVI Analysis** - Processes Sentinel-2 imagery via Google Earth Engine
+- **Carbon Credit Estimates** - Real-world 2025 rates ($10-$25/acre based on crop type)
+- **Automated ML Pipeline** - Monthly retraining with fresh satellite data
+- **Secure Architecture** - No service account keys in app, all GCP calls through Cloud Run backend
 
 ## 🚀 Quick Start
 
@@ -34,384 +18,229 @@ Flutter App → Firebase Auth → Cloud Run Backend → Earth Engine + Vertex AI
 
 - Flutter SDK 3.0+
 - Google Cloud project with Earth Engine & Vertex AI enabled
-- Firebase project
+- Firebase project configured
 - Google Maps API key
 
-### 1. Clone & Install
+### Setup
 
+1. **Clone and install dependencies**
 ```bash
-cd /Users/beuxb/Desktop/Projects/carbon_check_field
+git clone <your-repo-url>
+cd carbon_check_field
 flutter pub get
 ```
 
-### 2. Setup Firebase
-
-1. Download Firebase config files:
-   - `google-services.json` → `android/app/`
-   - `GoogleService-Info.plist` → `ios/Runner/`
-
-2. Enable anonymous authentication in Firebase Console
-
-### 3. Add Google Maps API Key
-
-Edit `lib/utils/constants.dart`:
-```dart
-static const String googleMapsApiKey = 'YOUR_GOOGLE_MAPS_API_KEY';
+2. **Configure environment variables**
+```bash
+cp .env.example .env
+# Edit .env with your API keys
 ```
 
-**Important:** The API key is stored locally and .gitignored. See deployment section for production builds.
+3. **Setup Firebase**
+- Download `google-services.json` → `android/app/`
+- Download `GoogleService-Info.plist` → `ios/Runner/`
+- Enable anonymous authentication in Firebase Console
 
-### 4. Deploy Backend
-
+4. **Deploy backend**
 ```bash
 cd backend
 ./setup_and_deploy.sh
 ```
 
-This deploys the secure Cloud Run backend that handles all GCP API calls.
-
-### 5. Update Backend URL
-
-After deployment, update `lib/utils/constants.dart`:
-```dart
-static const String backendUrl = 'https://your-service-url.run.app';
+5. **Update backend URL in `.env`**
+```
+BACKEND_URL=https://your-service-url.run.app
 ```
 
-### 6. Run the App
-
+6. **Run the app**
 ```bash
 # Web (Chrome)
-flutter run -d chrome
-
-# iOS
-flutter run -d ios
+flutter run -d chrome --web-port=8080
 
 # Android
 flutter run -d android
-```
 
----
+# iOS
+flutter run -d ios
+```
 
 ## 📁 Project Structure
 
 ```
-lib/
-├── main.dart                      # App entry point + Firebase init
-├── models/
-│   ├── field_data.dart           # Field polygon + geographic data
-│   └── prediction_result.dart    # Crop prediction + CO₂ income
-├── screens/
-│   ├── home_screen.dart          # Landing page
-│   ├── map_screen.dart           # Interactive map with drawing
-│   └── results_screen.dart       # Analysis results + CDL data
-├── services/
-│   ├── firebase_service.dart     # Authentication
-│   └── backend_service.dart      # Secure API calls to Cloud Run
-├── utils/
-│   ├── constants.dart            # Configuration (API keys, URLs)
-│   └── geo_utils.dart            # Geospatial calculations
-└── widgets/                       # Reusable UI components
+lib/                        # Flutter app code
+├── main.dart              # Entry point with Firebase init
+├── models/                # Data models (FieldData, PredictionResult, CropZone)
+├── screens/               # UI screens (Home, Map, Results, CropZones)
+├── services/              # Backend & Firebase services
+├── utils/                 # Constants and utilities
+└── widgets/               # Reusable components
 
-backend/
-├── app.py                         # FastAPI server
-├── Dockerfile                     # Container definition
-├── requirements.txt               # Python dependencies
-└── setup_and_deploy.sh           # Deployment script
+backend/                   # Python FastAPI backend
+├── app.py                # Main API with Earth Engine + Vertex AI integration
+├── Dockerfile            # Container for Cloud Run
+└── requirements.txt      # Python dependencies
 
-ml_pipeline/                        # 🤖 Automated ML Training Pipeline
-├── monthly_data_collection.py     # Collects training data from Earth Engine
-├── auto_retrain_model.py          # Retrains & deploys model in Vertex AI
-├── requirements.txt               # Python dependencies
-├── pipeline_config.yaml           # Configuration (crops, schedule, etc.)
-├── deploy_pipeline.sh             # One-click deployment
-├── README.md                      # Full pipeline documentation
-├── QUICK_REFERENCE.md             # Quick commands & URLs
-└── local_testing_guide.md         # Local testing instructions
+ml_pipeline/              # Automated ML training pipeline
+├── auto_retrain_model.py # Retrains model monthly
+├── monthly_data_collection.py  # Collects training data
+└── NDVI_info             # Earth Engine script for data generation
 ```
-
----
 
 ## 🤖 Automated ML Pipeline
 
-**NEW!** This project includes a fully automated machine learning pipeline that:
+The project includes a fully automated ML pipeline that:
 
-- ✅ **Collects** fresh training data from Earth Engine every month
-- ✅ **Retrains** the crop classification model with all historical data
-- ✅ **Deploys** the updated model to production automatically
-- ✅ **Zero manual work** required after setup!
+- ✅ Collects fresh training data from Earth Engine every month
+- ✅ Retrains the crop classification model with all historical data
+- ✅ Deploys the updated model to Vertex AI automatically
 
-### Quick Setup
+### Deploy the Pipeline
 
 ```bash
 cd ml_pipeline
 ./deploy_pipeline.sh
 ```
 
-**That's it!** The pipeline now runs automatically:
-- **1st of each month:** Collect 400 new training samples (100 per crop)
-- **5th of each month:** Retrain model and deploy to Vertex AI endpoint
+The pipeline runs automatically:
+- **1st of each month:** Collect 400 new training samples
+- **5th of each month:** Retrain model and deploy to production
 
-### Manual Testing
-
-```bash
-# Trigger data collection manually
-curl -X POST https://us-central1-ml-pipeline-477612.cloudfunctions.net/monthly-data-collection
-
-# Trigger model retraining manually
-curl -X POST https://us-central1-ml-pipeline-477612.cloudfunctions.net/auto-retrain-model
-```
-
-### Learn More
-
-- 📖 **Full Documentation:** [`ml_pipeline/README.md`](ml_pipeline/README.md)
-- ⚡ **Quick Commands:** [`ml_pipeline/QUICK_REFERENCE.md`](ml_pipeline/QUICK_REFERENCE.md)
-- 🧪 **Local Testing:** [`ml_pipeline/local_testing_guide.md`](ml_pipeline/local_testing_guide.md)
-
----
-
-## 🔧 Architecture
-
-### High-Level Flow
+## 🏗️ Architecture
 
 ```
-1. User draws field polygon on map
-2. User taps "Analyze Field"
-3. Flutter app:
-   - Signs in anonymously with Firebase
-   - Gets Firebase ID token
-   - Sends polygon + token to Cloud Run backend
-4. Cloud Run backend:
-   - Verifies Firebase token
-   - Calls Earth Engine (17 NDVI features)
-   - Calls Vertex AI (crop prediction)
-   - Queries USDA CDL (ground truth)
-   - Returns JSON with results
-5. Flutter displays:
-   - Crop type + confidence
-   - CDL ground truth + agreement indicator
-   - Field area (acres)
-   - CO₂ income range
+Flutter App (Mobile/Web)
+    ↓
+Firebase Authentication (anonymous)
+    ↓
+Cloud Run Backend (FastAPI)
+    ↓
+├── Google Earth Engine (NDVI features)
+├── Vertex AI (crop prediction)
+└── USDA CDL (ground truth validation)
 ```
 
-### Key Technical Decisions
+### Key Technical Features
 
-- **Flutter** - Single codebase for iOS + Android
-- **Cloud Run Backend** - Keeps all GCP credentials secure
-- **Firebase Auth** - No user registration required (anonymous)
-- **Direct REST APIs** - No Earth Engine SDK needed
-- **17 NDVI Features** - Temporal + spatial statistics from Sentinel-2
-
----
+- **Grid-based classification** - Fields >10 acres split into adaptive grids (max 25 cells)
+- **Spatial grouping** - Adjacent cells with same crop merged into zones
+- **Polygon validation** - Automatic repair of self-intersecting geometries
+- **Optimized cell sizing** - [50, 100, 200, 300, 500] meter grids based on field size
 
 ## 🧪 Testing
 
-### Test on Chrome (Easiest)
+### Test Endpoint Locally
 
 ```bash
-flutter run -d chrome
+cd backend
+uvicorn app:app --reload
 ```
 
-### Test on iOS Simulator
+### Run Flutter App Locally
 
 ```bash
-open -a Simulator
-flutter run -d ios
+# Web (easiest for testing)
+flutter run -d chrome --web-port=8080
+
+# Android device
+flutter run -d <device-id>
 ```
 
-### Test on Android Device
-
-1. Enable USB debugging on your phone
-2. Connect via USB
-3. Run:
-```bash
-adb devices
-flutter run -d android
-```
-
-### Verify Backend
+### Test Deployed Backend
 
 ```bash
-# Health check
 curl https://your-backend-url.run.app/health
 ```
 
----
-
 ## 🚢 Deployment
 
-### Android APK
+### Deploy Backend
 
 ```bash
-# Debug build
-flutter build apk --debug
-adb install -r build/app/outputs/flutter-apk/app-debug.apk
+cd backend
+gcloud run deploy carboncheck-field-api \
+  --source . \
+  --region us-central1 \
+  --allow-unauthenticated
+```
 
-# Release build
+### Build Android Release
+
+```bash
+flutter build apk --release
+# Install on device
+flutter install -d <device-id>
+
+# Or build app bundle for Google Play
 flutter build appbundle --release
 ```
 
-Upload `build/app/outputs/bundle/release/app-release.aab` to Google Play Console.
-
-### iOS App Store
+### Build iOS Release
 
 ```bash
 flutter build ios --release
+# Then open ios/Runner.xcworkspace in Xcode
 ```
 
-Then open `ios/Runner.xcworkspace` in Xcode to archive and upload.
+## 🔐 Security
 
-### App Icons
-
-Custom app icon is configured in:
-- `android/app/src/main/res/mipmap-*/ic_launcher.png`
-- `ios/Runner/Assets.xcassets/AppIcon.appiconset/`
-
----
-
-## 🔐 Security Details
-
-### What's Secure
-
-✅ **No GCP credentials in app** - All API calls go through Cloud Run backend  
-✅ **Application Default Credentials** - Backend uses Google-managed auth  
-✅ **Firebase token verification** - Backend validates every request  
-✅ **API key restrictions** - Google Maps key restricted by bundle ID  
-✅ **HTTPS everywhere** - All network traffic encrypted  
-
-### API Keys Management
-
-**Development:**
-- Keys stored locally in `lib/utils/constants.dart`
-- File is .gitignored to prevent commits
-
-**Production:**
-- For app store builds, keys must be added before compiling
-- Consider using Flutter environment variables or Firebase Remote Config
-- See `DEPLOYMENT.md` for full strategy
-
-### Firebase Setup
-
-1. Firebase Console → Authentication → Enable "Anonymous"
-2. Add iOS app (bundle ID: `com.carboncheck.field`)
-3. Add Android app (package name: `com.carboncheck.field`)
-4. Download config files and place in respective directories
-
----
+- ✅ **No GCP credentials in app** - All API calls proxied through Cloud Run
+- ✅ **Application Default Credentials** - Backend uses Google-managed auth
+- ✅ **Firebase token verification** - All requests authenticated
+- ✅ **Environment variables** - API keys in `.env` (gitignored)
+- ✅ **HTTPS everywhere** - All traffic encrypted
 
 ## 💰 Carbon Credit Rates (2025)
 
-| Crop         | Rate ($/acre/year) |
-|--------------|--------------------|
-| Corn         | $12 - $18          |
-| Soybeans     | $15 - $22          |
-| Alfalfa      | $18 - $25          |
-| Winter Wheat | $10 - $15          |
+| Crop         | $/acre/year |
+|--------------|-------------|
+| Corn         | $12 - $18   |
+| Soybeans     | $15 - $22   |
+| Alfalfa      | $18 - $25   |
+| Winter Wheat | $10 - $15   |
 
-*Based on Indigo Ag and Truterra carbon credit markets*
-
----
+*Based on Indigo Ag and Truterra markets*
 
 ## 🐛 Troubleshooting
 
-### "Firebase initialization failed"
-- Ensure `google-services.json` and `GoogleService-Info.plist` are in correct directories
-- Run `flutterfire configure` to regenerate configs
+### "Backend timeout or 500 error"
+- Check backend logs: `gcloud run logs tail carboncheck-field-api --region us-central1`
+- Verify Earth Engine authentication is configured
+- Check polygon is not self-intersecting (app will auto-fix simple cases)
 
 ### "Map is blank"
-- Check Google Maps API key in `constants.dart`
-- Enable billing on your GCP project
-- Verify Maps SDK for iOS/Android are enabled
+- Verify Google Maps API key in `.env`
+- Enable billing on GCP project
+- Enable Maps SDK for Android/iOS
 
-### "Analysis failed"
-- Check backend URL in `constants.dart`
-- Verify Cloud Run service is deployed
-- Check Cloud Run logs: `gcloud run logs read carboncheck-field-api --region us-central1`
+### "Firebase initialization failed"
+- Ensure `google-services.json` and `GoogleService-Info.plist` are present
+- Enable anonymous auth in Firebase Console
 
-### "Device not found" (Android)
-- Install adb: `brew install --cask android-platform-tools`
-- Reconnect phone and allow USB debugging
-- Run: `adb devices` to verify connection
-
-### Gradle errors (Android)
-- Run: `cd android && ./gradlew clean`
-- Update Gradle wrapper if needed
-- Accept licenses: `flutter doctor --android-licenses`
-
----
+### Android build errors
+```bash
+cd android
+./gradlew clean
+flutter clean
+flutter pub get
+```
 
 ## 📊 Monitoring
 
 ### Cloud Run Logs
 ```bash
-gcloud run logs tail carboncheck-field-api --region us-central1
+gcloud run logs tail carboncheck-field-api --region us-central1 --format json
 ```
-
-### Firebase Users
-- Firebase Console → Authentication → Users
-- Monitor anonymous user count
 
 ### API Usage
 - Google Cloud Console → APIs & Services → Dashboard
-- Monitor Earth Engine and Vertex AI quotas
-
----
-
-## 💾 Data Flow
-
-### Earth Engine Features (17 values)
-
-1. NDVI statistics: mean, std, min, max
-2. Percentiles: p25, p50, p75
-3. Temporal: early_season, late_season
-4. Location: latitude, longitude, elevation
-5. Derived: range, IQR, change, early_ratio, late_ratio
-
-### Backend Response Format
-
-```json
-{
-  "crop": "Corn",
-  "confidence": 0.98,
-  "area_acres": 47.2,
-  "co2_income_low": 1240,
-  "co2_income_high": 1880,
-  "cdl_crop": "Corn",
-  "cdl_confidence": 0.95,
-  "cdl_year": 2024,
-  "matches_cdl": true
-}
-```
-
----
-
-## 🎯 Future Enhancements
-
-- [ ] Field history storage (SQLite/Firebase)
-- [ ] Multi-year trend analysis
-- [ ] Offline mode with cached tiles
-- [ ] PDF report generation
-- [ ] User accounts (email/social login)
-- [ ] Team/organization support
-- [ ] Carbon marketplace integration
-
----
+- Monitor Earth Engine, Vertex AI, and Maps quotas
 
 ## 📜 License
 
-MIT License - See LICENSE file for details
+MIT License
 
 ---
 
-## 🙋 Support
+**Built with Flutter, Google Earth Engine, and Vertex AI**
 
-For issues or questions:
-1. Check troubleshooting section above
-2. Review Cloud Run logs for backend errors
-3. Check Firebase Auth is properly configured
-4. Verify all API keys are correct
-
----
-
-**Built with ❤️ for farmers using Flutter, Earth Engine, and Vertex AI**
-
-**Default Map Center:** 44.409438290384166, -88.4304410977501 (Northeast Wisconsin)
+**Default Map Center:** Northeast Wisconsin (44.409438290384166, -88.4304410977501)

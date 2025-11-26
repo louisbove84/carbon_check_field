@@ -57,8 +57,7 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   
-  # Assets folder for service account JSON and .env file
+  # Assets folder for .env file
   assets:
-    - assets/
     - .env
 
