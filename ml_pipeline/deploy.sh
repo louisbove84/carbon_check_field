@@ -25,7 +25,8 @@ echo "============================================================"
 echo "📤 Step 1: Uploading configuration"
 echo "============================================================"
 if [ -f "config.yaml" ]; then
-    ./upload_config.sh
+    gsutil cp config.yaml gs://carboncheck-data/config/config.yaml
+    echo "✅ Config uploaded"
 else
     echo "⚠️  config.yaml not found, skipping upload"
 fi
