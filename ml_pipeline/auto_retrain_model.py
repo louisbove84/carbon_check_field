@@ -31,49 +31,25 @@ from model_evaluation import (
     create_or_load_holdout_set
 )
 
+# Import centralized configuration
+from config import (
+    PROJECT_ID, REGION, BUCKET_NAME, DATASET_ID,
+    TRAINING_TABLE_ID, BASE_FEATURE_COLUMNS,
+    MIN_TRAINING_SAMPLES, ABSOLUTE_MIN_ACCURACY,
+    get_model_config
+)
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# CONFIGURATION
+# CONFIGURATION (from centralized config.py)
 # ============================================================
 
-PROJECT_ID = "ml-pipeline-477612"
-REGION = "us-central1"
-BUCKET_NAME = "carboncheck-data"
-DATASET_ID = "crop_ml"
-TABLE_ID = "training_features"
-# ENDPOINT_ID = None  # Creates new endpoint for sklearn models (old AutoML endpoint deleted)
-
-# Model training configuration
-MODEL_CONFIG = {
-    'n_estimators': 100,
-    'max_depth': 10,
-    'min_samples_split': 5,
-    'random_state': 42,
-    'n_jobs': -1
-}
-
-# Base features from BigQuery
-BASE_FEATURE_COLUMNS = [
-    'ndvi_mean',
-    'ndvi_std',
-    'ndvi_min',
-    'ndvi_max',
-    'ndvi_p25',
-    'ndvi_p50',
-    'ndvi_p75',
-    'ndvi_early',
-    'ndvi_late',
-    'elevation_m',
-    'longitude',
-    'latitude'
-]
-
-# Minimum samples required for training
-MIN_TRAINING_SAMPLES = 100  # Production threshold
-MIN_ACCURACY_THRESHOLD = 0.70  # Production threshold
+TABLE_ID = TRAINING_TABLE_ID
+MODEL_CONFIG = get_model_config()
+MIN_ACCURACY_THRESHOLD = ABSOLUTE_MIN_ACCURACY
 
 # ============================================================
 # BIGQUERY DATA LOADING

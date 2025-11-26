@@ -10,22 +10,21 @@ bq query --use_legacy_sql=false < setup_evaluation_tables.sql
 
 ### 2. Deploy Cloud Functions (5 minutes)
 ```bash
-# Data collection function
-gcloud functions deploy monthly-data-collection \
-  --gen2 --runtime=python311 --region=us-central1 \
-  --source=. --entry-point=collect_training_data \
-  --trigger-http --allow-unauthenticated \
-  --timeout=3600s --memory=4Gi --max-instances=1 \
-  --service-account=ml-pipeline-sa@ml-pipeline-477612.iam.gserviceaccount.com
+# Option A: Use deployment script (recommended - includes config)
+cd /Users/beuxb/Desktop/Projects/carbon_check_field/ml_pipeline
+./deploy_with_config.sh
 
-# Model retraining function (with evaluation)
-gcloud functions deploy auto-retrain-model \
-  --gen2 --runtime=python311 --region=us-central1 \
-  --source=. --entry-point=retrain_model \
-  --trigger-http --allow-unauthenticated \
-  --timeout=3600s --memory=4Gi --max-instances=1 \
-  --service-account=ml-pipeline-sa@ml-pipeline-477612.iam.gserviceaccount.com
+# Option B: Manual deployment (if you want to customize)
+# Edit deploy_with_config.sh to change configuration values
+# Then run: ./deploy_with_config.sh
 ```
+
+**Configuration is now centralized!** Edit `deploy_with_config.sh` to change:
+- Quality gates (accuracy thresholds, F1 requirements)
+- Data collection settings (samples per crop)
+- Model hyperparameters (n_estimators, max_depth, etc.)
+
+See [`CONFIG_MANAGEMENT.md`](CONFIG_MANAGEMENT.md) for details.
 
 ### 3. Test Manually (5 minutes)
 ```bash

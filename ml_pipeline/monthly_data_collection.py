@@ -18,46 +18,21 @@ from typing import List, Dict, Any
 from google.cloud import bigquery
 from google.cloud import storage
 
+# Import centralized configuration
+from config import (
+    PROJECT_ID, REGION, BUCKET_NAME, DATASET_ID,
+    TRAINING_TABLE_ID, SAMPLES_PER_CROP, CROPS
+)
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# CONFIGURATION
+# CONFIGURATION (from centralized config.py)
 # ============================================================
 
-PROJECT_ID = "ml-pipeline-477612"
-REGION = "us-central1"
-BUCKET_NAME = "carboncheck-data"
-DATASET_ID = "crop_ml"
-TABLE_ID = "training_features"
-
-# Number of samples to collect per crop each month
-SAMPLES_PER_CROP = 100
-
-# CDL crop codes
-CROPS = [
-    {
-        'name': 'Corn',
-        'code': 1,
-        'counties': ['17113', '17019', '17105', '18141', '18003', '19169', '19153', '19013', '27079', '27165']
-    },
-    {
-        'name': 'Soybeans',
-        'code': 5,
-        'counties': ['17113', '17019', '18141', '18003', '18033', '19169', '19153', '19013', '27079', '27165']
-    },
-    {
-        'name': 'Alfalfa',
-        'code': 36,
-        'counties': ['06025', '06107', '06099', '06111', '53077', '53003', '16083', '08123', '08069']
-    },
-    {
-        'name': 'Winter Wheat',
-        'code': 24,
-        'counties': ['20095', '20199', '20155', '20051', '20165', '40047', '40011', '48179', '31081', '31089']
-    }
-]
+TABLE_ID = TRAINING_TABLE_ID
 
 # ============================================================
 # EARTH ENGINE FUNCTIONS

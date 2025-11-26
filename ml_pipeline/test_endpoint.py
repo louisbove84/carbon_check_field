@@ -8,10 +8,11 @@ import json
 from google.cloud import aiplatform, bigquery
 import pandas as pd
 
+# Import centralized configuration
+from config import PROJECT_ID, REGION
+
 # Configuration
-PROJECT_ID = "ml-pipeline-477612"
-REGION = "us-central1"
-ENDPOINT_ID = "2450616804754587648"
+ENDPOINT_ID = "2450616804754587648"  # Your current endpoint ID
 
 # Initialize Vertex AI
 aiplatform.init(project=PROJECT_ID, location=REGION)

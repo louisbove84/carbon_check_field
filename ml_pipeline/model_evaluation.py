@@ -24,34 +24,16 @@ from sklearn.metrics import (
 )
 from google.cloud import bigquery, storage, aiplatform
 
+# Import centralized configuration
+from config import (
+    PROJECT_ID, REGION, BUCKET_NAME, DATASET_ID,
+    TRAINING_TABLE_ID, HOLDOUT_TABLE_ID, METRICS_TABLE_ID,
+    ABSOLUTE_MIN_ACCURACY, MIN_PER_CROP_F1, IMPROVEMENT_MARGIN,
+    MIN_TEST_SAMPLES, BASE_FEATURE_COLUMNS
+)
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
-PROJECT_ID = "ml-pipeline-477612"
-REGION = "us-central1"
-BUCKET_NAME = "carboncheck-data"
-DATASET_ID = "crop_ml"
-TRAINING_TABLE_ID = "training_features"
-METRICS_TABLE_ID = "model_performance"
-HOLDOUT_TABLE_ID = "holdout_test_set"
-
-# Deployment thresholds
-ABSOLUTE_MIN_ACCURACY = 0.75  # Must be at least 75% accurate
-MIN_PER_CROP_F1 = 0.70  # Each crop must have F1 > 0.70
-IMPROVEMENT_MARGIN = 0.02  # Challenger must beat champion by 2%
-MIN_TEST_SAMPLES = 50  # Minimum holdout samples required
-
-# Feature columns (must match training)
-BASE_FEATURE_COLUMNS = [
-    'ndvi_mean', 'ndvi_std', 'ndvi_min', 'ndvi_max',
-    'ndvi_p25', 'ndvi_p50', 'ndvi_p75',
-    'ndvi_early', 'ndvi_late',
-    'elevation_m', 'longitude', 'latitude'
-]
 
 # ============================================================
 # HOLDOUT TEST SET MANAGEMENT
