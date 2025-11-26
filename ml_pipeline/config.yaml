@@ -1,0 +1,158 @@
+# ============================================================
+# ML Pipeline Configuration
+# ============================================================
+# This file is stored in Cloud Storage and loaded by all functions.
+# To update configuration:
+#   1. Edit this file
+#   2. Run: ./upload_config.sh
+#   3. Changes take effect on next function execution (no redeployment!)
+
+# ============================================================
+# GOOGLE CLOUD PROJECT
+# ============================================================
+project:
+  id: ml-pipeline-477612
+  region: us-central1
+
+# ============================================================
+# STORAGE & DATA
+# ============================================================
+storage:
+  bucket: carboncheck-data
+  
+bigquery:
+  dataset: crop_ml
+  tables:
+    training: training_features
+    holdout: holdout_test_set
+    metrics: model_performance
+    deployment: deployment_history
+
+# ============================================================
+# VERTEX AI MODEL
+# ============================================================
+model:
+  name: crop-classifier-latest
+  endpoint_name: crop-endpoint
+  
+  # RandomForest hyperparameters
+  hyperparameters:
+    n_estimators: 100
+    max_depth: 10
+    min_samples_split: 5
+    random_state: 42
+
+# ============================================================
+# DATA COLLECTION
+# ============================================================
+data_collection:
+  samples_per_crop: 100  # Samples collected per crop each month
+  
+  # Crop definitions with CDL codes and counties
+  crops:
+    - name: Corn
+      code: 1
+      counties:
+        - "17113"  # Illinois - McLean
+        - "17019"  # Illinois - Champaign
+        - "17105"  # Illinois - Livingston
+        - "18141"  # Indiana - St. Joseph
+        - "18003"  # Indiana - Allen
+        - "19169"  # Iowa - Story
+        - "19153"  # Iowa - Polk
+        - "19013"  # Iowa - Black Hawk
+        - "27079"  # Minnesota - Le Sueur
+        - "27165"  # Minnesota - Watonwan
+    
+    - name: Soybeans
+      code: 5
+      counties:
+        - "17113"
+        - "17019"
+        - "18141"
+        - "18003"
+        - "18033"  # Indiana - DeKalb
+        - "19169"
+        - "19153"
+        - "19013"
+        - "27079"
+        - "27165"
+    
+    - name: Alfalfa
+      code: 36
+      counties:
+        - "06025"  # California - Imperial
+        - "06107"  # California - Tulare
+        - "06099"  # California - Stanislaus
+        - "06111"  # California - Ventura
+        - "53077"  # Washington - Yakima
+        - "53003"  # Washington - Asotin
+        - "16083"  # Idaho - Twin Falls
+        - "08123"  # Colorado - Weld
+        - "08069"  # Colorado - Larimer
+    
+    - name: Winter Wheat
+      code: 24
+      counties:
+        - "20095"  # Kansas - Kingman
+        - "20199"  # Kansas - Woodson
+        - "20155"  # Kansas - Reno
+        - "20051"  # Kansas - Ellis
+        - "20165"  # Kansas - Rush
+        - "40047"  # Oklahoma - Garfield
+        - "40011"  # Oklahoma - Blaine
+        - "48179"  # Texas - Gray
+        - "31081"  # Nebraska - Hamilton
+        - "31089"  # Nebraska - Holt
+
+# ============================================================
+# QUALITY GATES (Most commonly adjusted!)
+# ============================================================
+quality_gates:
+  # Minimum accuracy for deployment
+  absolute_min_accuracy: 0.75  # 75%
+  
+  # Minimum F1 score per crop
+  min_per_crop_f1: 0.70  # 70%
+  
+  # How much better challenger must be than champion
+  improvement_margin: 0.02  # 2% better
+  
+  # Minimum samples required
+  min_training_samples: 100
+  min_test_samples: 50
+
+# ============================================================
+# FEATURE ENGINEERING
+# ============================================================
+features:
+  # Base NDVI features from satellite imagery
+  base_columns:
+    - ndvi_mean
+    - ndvi_std
+    - ndvi_min
+    - ndvi_max
+    - ndvi_p25
+    - ndvi_p50
+    - ndvi_p75
+    - ndvi_early
+    - ndvi_late
+    - elevation_m
+    - longitude
+    - latitude
+
+# ============================================================
+# NOTES
+# ============================================================
+# Version: 1.0
+# Last Updated: 2025-11-26
+# 
+# To update configuration:
+#   ./upload_config.sh
+# 
+# To view current config on GCP:
+#   gsutil cat gs://carboncheck-data/config/config.yaml
+# 
+# Configuration history (using GCS versioning):
+#   gsutil ls -a gs://carboncheck-data/config/config.yaml
+

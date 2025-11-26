@@ -2,35 +2,105 @@
 
 ## Overview
 
-All configuration is centralized in **environment variables** that are set during Cloud Function deployment. This allows you to change configuration without modifying code.
+All configuration is centralized in a **YAML file stored on Cloud Storage**. This allows you to change configuration without modifying code or redeploying functions!
 
-## How It Works
+## How It Works (Recommended: Cloud Storage YAML)
 
 ```
-config.py (centralized config)
+config.yaml (single source of truth)
+    ↓ upload via ./upload_config.sh
+Cloud Storage (gs://carboncheck-data/config/config.yaml)
+    ↓ loaded at runtime by
+config.py
     ↓ imports from
 All Python files
-    ↓ read from
-Environment Variables
-    ↓ set via
-gcloud functions deploy --set-env-vars
+```
+
+**Priority:** 
+1. **Cloud Storage YAML** (primary, recommended)
+2. Environment Variables (fallback)
+3. Hardcoded defaults (last resort)
+
+---
+
+## Quick Start: Using YAML Configuration (Recommended)
+
+### 1. Edit Configuration
+
+```bash
+cd /Users/beuxb/Desktop/Projects/carbon_check_field/ml_pipeline
+
+# Edit config.yaml
+nano config.yaml  # or open in your editor
+```
+
+### 2. Upload to Cloud Storage
+
+```bash
+./upload_config.sh
+```
+
+**That's it!** Changes take effect on next function execution. No redeployment needed!
+
+### 3. Verify
+
+```bash
+# View current config on GCP
+gsutil cat gs://carboncheck-data/config/config.yaml
+
+# Test immediately
+./test_pipeline.sh retrain
 ```
 
 ---
 
-## Configuration File: `config.py`
+## Why YAML on Cloud Storage?
 
-All constants are defined in one place and read from environment variables:
+### ✅ Benefits Over Environment Variables
+
+| Feature | YAML on GCS | Environment Variables |
+|---------|-------------|----------------------|
+| **Update without redeployment** | ✅ Yes | ❌ No |
+| **Single source of truth** | ✅ Yes | ⚠️ Per-function |
+| **Version control** | ✅ Yes (GCS versioning) | ❌ No |
+| **Easy rollback** | ✅ Yes (backups) | ❌ No |
+| **View/edit easily** | ✅ Yes (YAML file) | ⚠️ CLI only |
+| **Change quality gates instantly** | ✅ Yes | ❌ Requires redeploy |
+
+**Result:** Change quality gates at 11 PM without redeploying! 🚀
+
+---
+
+## Configuration Files
+
+### `config.yaml` - Main Configuration File
+
+Single source of truth for all settings:
+
+```yaml
+quality_gates:
+  absolute_min_accuracy: 0.75  # 75%
+  min_per_crop_f1: 0.70         # 70%
+  improvement_margin: 0.02       # 2%
+
+data_collection:
+  samples_per_crop: 100
+
+model:
+  hyperparameters:
+    n_estimators: 100
+    max_depth: 10
+```
+
+### `config.py` - Configuration Loader
+
+Loads from Cloud Storage, then falls back to env vars:
 
 ```python
 from config import PROJECT_ID, REGION, BUCKET_NAME, etc.
 ```
 
-**Benefits:**
-- ✅ Single source of truth
-- ✅ No hardcoded values in code
-- ✅ Change config without code changes
-- ✅ Different configs for dev/staging/prod
+**You don't need to touch this file!** It automatically loads from Cloud Storage.
 
 ---
 
@@ -92,9 +162,30 @@ gcloud functions deploy auto-retrain-model \
 
 ## Updating Configuration (Without Redeploying Code!)
 
-### Update Quality Gates
+### Method 1: YAML File (Recommended)
 
 **Example: Make gates more strict (require 80% accuracy, 3% improvement)**
+
+```bash
+cd /Users/beuxb/Desktop/Projects/carbon_check_field/ml_pipeline
+
+# Edit config.yaml
+nano config.yaml
+
+# Change:
+quality_gates:
+  absolute_min_accuracy: 0.80  # Was 0.75
+  improvement_margin: 0.03      # Was 0.02
+
+# Upload
+./upload_config.sh
+```
+
+**Done!** Next function execution uses new config. No redeployment!
+
+### Method 2: Environment Variables (Legacy)
+
+**Example: Same change via environment variables**
 
 ```bash
 gcloud functions deploy auto-retrain-model \
@@ -103,17 +194,22 @@ gcloud functions deploy auto-retrain-model \
   --update-env-vars ABSOLUTE_MIN_ACCURACY=0.80,IMPROVEMENT_MARGIN=0.03
 ```
 
-This updates ONLY the environment variables, no code redeployment needed!
+**Note:** This requires redeployment and only updates one function at a time.
 
-### Update Data Collection Rate
+### Update Data Collection Rate (YAML)
 
 **Example: Collect 200 samples per crop instead of 100**
 
 ```bash
-gcloud functions deploy monthly-data-collection \
-  --region=us-central1 \
-  --gen2 \
-  --update-env-vars SAMPLES_PER_CROP=200
+# Edit config.yaml
+nano config.yaml
+
+# Change:
+data_collection:
+  samples_per_crop: 200  # Was 100
+
+# Upload
+./upload_config.sh
 ```
 
 ### Update Multiple Variables at Once
@@ -133,13 +229,24 @@ gcloud functions deploy auto-retrain-model \
 
 ## View Current Configuration
 
-### View All Environment Variables
+### View YAML on Cloud Storage
 
 ```bash
-gcloud functions describe auto-retrain-model \
-  --region=us-central1 \
-  --gen2 \
-  --format='table(serviceConfig.environmentVariables)'
+# View current production config
+gsutil cat gs://carboncheck-data/config/config.yaml
+
+# View specific section
+gsutil cat gs://carboncheck-data/config/config.yaml | grep -A 5 "quality_gates"
+```
+
+### View Backups
+
+```bash
+# List all backups
+gsutil ls gs://carboncheck-data/config/backups/
+
+# View specific backup
+gsutil cat gs://carboncheck-data/config/backups/config_20251126_143000.yaml
 ```
 
 ### Test Configuration Locally
@@ -147,8 +254,22 @@ gcloud functions describe auto-retrain-model \
 ```bash
 cd /Users/beuxb/Desktop/Projects/carbon_check_field/ml_pipeline
 
-# Print current config (uses defaults if env vars not set)
+# Print current config (loads from GCS if available)
 python3 config.py
+```
+
+### Rollback to Previous Version
+
+```bash
+# List backups
+gsutil ls gs://carboncheck-data/config/backups/
+
+# Rollback to specific backup
+gsutil cp gs://carboncheck-data/config/backups/config_20251126_143000.yaml \
+  gs://carboncheck-data/config/config.yaml
+
+# Verify
+gsutil cat gs://carboncheck-data/config/config.yaml | head -20
 ```
 
 **Output:**
