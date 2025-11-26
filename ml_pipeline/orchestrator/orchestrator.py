@@ -381,12 +381,12 @@ def evaluate_and_deploy(training_result):
         if challenger_accuracy >= gates['absolute_min_accuracy']:
             logger.info("   ✅ Quality gates passed")
             
-            # Deploy to Vertex AI endpoint
+            # Deploy to Vertex AI endpoint with evaluation metrics
             project_id = config['project']['id']
             region = config['project']['region']
             bucket_name = config['storage']['bucket']
             
-            deploy_model_to_endpoint(project_id, region, bucket_name)
+            deploy_model_to_endpoint(project_id, region, bucket_name, training_result)
             
             return {
                 'status': 'success',
@@ -413,8 +413,8 @@ def evaluate_and_deploy(training_result):
         }
 
 
-def deploy_model_to_endpoint(project_id, region, bucket_name):
-    """Deploy model to Vertex AI endpoint."""
+def deploy_model_to_endpoint(project_id, region, bucket_name, training_metrics=None):
+    """Deploy model to Vertex AI endpoint with evaluation."""
     aiplatform.init(project=project_id, location=region)
     
     model_name = config['model']['name']
@@ -426,6 +426,36 @@ def deploy_model_to_endpoint(project_id, region, bucket_name):
         artifact_uri=f'gs://{bucket_name}/models/crop_classifier_latest',
         serving_container_image_uri='us-docker.pkg.dev/vertex-ai/prediction/sklearn-cpu.1-3:latest'
     )
+    
+    logger.info(f"   Model uploaded: {model.resource_name}")
+    
+    # Attach evaluation metrics if available
+    if training_metrics and 'metrics' in training_metrics:
+        try:
+            metrics = training_metrics['metrics']
+            
+            # Create evaluation metrics in Vertex AI format
+            evaluation_metrics = {
+                'accuracy': metrics.get('test_accuracy', 0),
+                'precision': metrics.get('classification_report', {}).get('weighted avg', {}).get('precision', 0),
+                'recall': metrics.get('classification_report', {}).get('weighted avg', {}).get('recall', 0),
+                'f1Score': metrics.get('classification_report', {}).get('weighted avg', {}).get('f1-score', 0)
+            }
+            
+            # Log evaluation metadata
+            model.update(
+                display_name=model_name,
+                description=f"Test Accuracy: {metrics.get('test_accuracy', 0):.2%} | "
+                           f"F1: {evaluation_metrics['f1Score']:.2%} | "
+                           f"Samples: {metrics.get('n_train_samples', 0)} train, {metrics.get('n_test_samples', 0)} test"
+            )
+            
+            logger.info(f"   ✅ Evaluation metrics attached to model")
+            logger.info(f"   Accuracy: {evaluation_metrics['accuracy']:.2%}")
+            logger.info(f"   F1 Score: {evaluation_metrics['f1Score']:.2%}")
+            
+        except Exception as e:
+            logger.warning(f"   ⚠️  Could not attach evaluation: {e}")
     
     # Get or create endpoint
     existing_endpoints = aiplatform.Endpoint.list(filter=f'display_name="{endpoint_name}"')
