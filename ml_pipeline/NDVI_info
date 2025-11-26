@@ -87,7 +87,8 @@ print('');
 // ---------------------------------------------------------------
 // 2. MAP SETUP
 // ---------------------------------------------------------------
-Map.setCenter(-98, 39, 5);  // Center on US
+// Map.setCenter(-98, 39, 5);  // Center on US
+Map.setCenter(-88.43055692640955, 44.409572652286904, 6);  // Center on specific location
 Map.setOptions('SATELLITE');
 
 // Load CDL for background
