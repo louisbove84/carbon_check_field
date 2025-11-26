@@ -86,24 +86,51 @@ ml_pipeline/              # Automated ML training pipeline
 └── NDVI_info             # Earth Engine script for data generation
 ```
 
-## 🤖 Automated ML Pipeline
+## 🤖 Automated ML Pipeline with Quality Gates
 
-The project includes a fully automated ML pipeline that:
+The project includes a production-grade ML pipeline with champion/challenger evaluation:
 
-- ✅ Collects fresh training data from Earth Engine every month
-- ✅ Retrains the crop classification model with all historical data
-- ✅ Deploys the updated model to Vertex AI automatically
+- ✅ **Monthly data collection** - Collects fresh training data from Earth Engine
+- ✅ **Permanent holdout test set** - 20% of data reserved for unbiased evaluation
+- ✅ **Automated retraining** - Trains on all historical data (excluding holdout)
+- ✅ **Champion vs Challenger** - Compares new model against current production model
+- ✅ **Quality gates** - Only deploys if new model meets thresholds:
+  - Accuracy ≥ 75% (absolute minimum)
+  - Each crop F1 score ≥ 0.70
+  - Beats champion by ≥ 2%
+- ✅ **Metrics tracking** - Stores all evaluations in BigQuery for monitoring
 
 ### Deploy the Pipeline
 
 ```bash
 cd ml_pipeline
+
+# 1. Create BigQuery tables for evaluation
+bq query --use_legacy_sql=false < setup_evaluation_tables.sql
+
+# 2. Deploy Cloud Functions
 ./deploy_pipeline.sh
 ```
 
 The pipeline runs automatically:
 - **1st of each month:** Collect 400 new training samples
-- **5th of each month:** Retrain model and deploy to production
+- **5th of each month:** Train & evaluate new model, deploy only if it passes all quality gates
+
+### View Evaluation Results
+
+```sql
+-- Recent model performance
+SELECT model_type, accuracy, corn_f1, soybeans_f1, alfalfa_f1, winter_wheat_f1
+FROM `ml-pipeline-477612.crop_ml.model_performance`
+ORDER BY evaluation_time DESC LIMIT 10;
+
+-- Deployment history
+SELECT deployment_time, deployment_decision, accuracy, gates_failed
+FROM `ml-pipeline-477612.crop_ml.deployment_history`
+ORDER BY deployment_time DESC LIMIT 10;
+```
+
+**📖 Full Guide:** See [`ml_pipeline/MODEL_EVALUATION_GUIDE.md`](ml_pipeline/MODEL_EVALUATION_GUIDE.md) for detailed explanation
 
 ## 🏗️ Architecture
 

@@ -24,6 +24,13 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 import joblib
 
+# Import evaluation module
+from model_evaluation import (
+    evaluate_and_decide,
+    get_training_set_excluding_holdout,
+    create_or_load_holdout_set
+)
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -72,43 +79,51 @@ MIN_ACCURACY_THRESHOLD = 0.70  # Production threshold
 # BIGQUERY DATA LOADING
 # ============================================================
 
-def load_data_from_bigquery() -> pd.DataFrame:
+def load_data_from_bigquery(exclude_holdout: bool = True) -> pd.DataFrame:
     """
     Load training data from BigQuery.
+    
+    Args:
+        exclude_holdout: If True, exclude holdout test set to prevent data leakage
     
     Returns:
         DataFrame with training data
     """
     logger.info("📥 Loading data from BigQuery...")
     
-    client = bigquery.Client(project=PROJECT_ID)
-    
-    query = f"""
-    SELECT
-        field_id,
-        crop,
-        crop_code,
-        ndvi_mean,
-        ndvi_std,
-        ndvi_min,
-        ndvi_max,
-        ndvi_p25,
-        ndvi_p50,
-        ndvi_p75,
-        ndvi_early,
-        ndvi_late,
-        elevation_m,
-        longitude,
-        latitude
-    FROM `{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}`
-    WHERE ndvi_mean IS NOT NULL
-        AND ndvi_std IS NOT NULL
-        AND ndvi_p50 IS NOT NULL
-    """
-    
-    df = client.query(query).to_dataframe()
-    logger.info(f"✅ Loaded {len(df)} fields")
-    logger.info(f"   Crops: {df['crop'].value_counts().to_dict()}")
+    if exclude_holdout:
+        # Use helper function that excludes holdout samples
+        df = get_training_set_excluding_holdout()
+    else:
+        # Load all data (used for legacy/testing)
+        client = bigquery.Client(project=PROJECT_ID)
+        
+        query = f"""
+        SELECT
+            field_id,
+            crop,
+            crop_code,
+            ndvi_mean,
+            ndvi_std,
+            ndvi_min,
+            ndvi_max,
+            ndvi_p25,
+            ndvi_p50,
+            ndvi_p75,
+            ndvi_early,
+            ndvi_late,
+            elevation_m,
+            longitude,
+            latitude
+        FROM `{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}`
+        WHERE ndvi_mean IS NOT NULL
+            AND ndvi_std IS NOT NULL
+            AND ndvi_p50 IS NOT NULL
+        """
+        
+        df = client.query(query).to_dataframe()
+        logger.info(f"✅ Loaded {len(df)} fields")
+        logger.info(f"   Crops: {df['crop'].value_counts().to_dict()}")
     
     return df
 
@@ -441,13 +456,21 @@ def deploy_model_to_vertex_ai(
 def retrain_model(request=None):
     """
     Main Cloud Function entry point.
-    Retrains and deploys the crop classification model.
+    Retrains model with champion/challenger evaluation and deployment gating.
+    
+    Pipeline:
+    1. Ensure holdout test set exists (20% of data, permanent)
+    2. Load training data (excluding holdout)
+    3. Train challenger model
+    4. Save to GCS (versioned + latest)
+    5. Evaluate challenger vs champion on holdout set
+    6. Deploy ONLY if challenger passes quality gates
     
     Args:
         request: Flask request object (for Cloud Function compatibility)
     
     Returns:
-        JSON response with training summary
+        JSON response with training summary and deployment decision
     """
     logger.info("=" * 60)
     logger.info("🌾 AUTOMATED MODEL RETRAINING PIPELINE")
@@ -456,10 +479,16 @@ def retrain_model(request=None):
     start_time = datetime.now()
     
     try:
-        # Step 1: Load data from BigQuery
-        df = load_data_from_bigquery()
+        # Step 0: Ensure holdout test set exists
+        logger.info("📊 Step 0: Ensuring holdout test set exists...")
+        create_or_load_holdout_set(force_recreate=False)
+        
+        # Step 1: Load training data (EXCLUDING holdout set)
+        logger.info("📥 Step 1: Loading training data (excluding holdout)...")
+        df = load_data_from_bigquery(exclude_holdout=True)
         
         # Step 2: Check data quality
+        logger.info("🔍 Step 2: Checking data quality...")
         quality_report = check_training_data_quality(df)
         
         if quality_report['total_samples'] < MIN_TRAINING_SAMPLES:
@@ -469,52 +498,76 @@ def retrain_model(request=None):
             )
         
         # Step 3: Engineer features
+        logger.info("🔧 Step 3: Engineering features...")
         df_enhanced, feature_cols = engineer_features(df)
         
-        # Step 4: Train model (returns Pipeline with scaler + model)
+        # Step 4: Train challenger model
+        logger.info("🤖 Step 4: Training challenger model...")
         pipeline, metrics = train_local_model(df_enhanced, feature_cols)
         
-        # Step 5: Check accuracy threshold
-        test_accuracy = metrics['test_accuracy']
-        if test_accuracy < MIN_ACCURACY_THRESHOLD:
-            logger.warning(
-                f"⚠️  Model accuracy ({test_accuracy:.2%}) below threshold "
-                f"({MIN_ACCURACY_THRESHOLD:.0%}). Proceeding with caution..."
-            )
+        # Note: We no longer check MIN_ACCURACY_THRESHOLD here
+        # The evaluation module will handle all quality gates
         
-        # Step 6: Save model to GCS (pipeline includes scaler)
+        # Step 5: Save challenger model to GCS (but don't deploy yet!)
+        logger.info("💾 Step 5: Saving challenger model to GCS...")
         model_gcs_path = save_model_to_gcs(pipeline, feature_cols, BUCKET_NAME)
         
-        # Step 7: Deploy to Vertex AI endpoint (reuses existing 'crop-endpoint' if available)
-        model, endpoint = deploy_model_to_vertex_ai(model_gcs_path, endpoint_id=None)
+        # Save as separate challenger version for evaluation
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M')
+        challenger_path = f'gs://{BUCKET_NAME}/models/crop_classifier_archive/crop_classifier_{timestamp}/model.joblib'
         
-        # Extract IDs from resource names
-        endpoint_id = endpoint.name.split('/')[-1]
-        model_id = model.name.split('/')[-1]
+        # Step 6: Evaluate challenger vs champion
+        logger.info("⚖️  Step 6: Evaluating challenger vs champion...")
+        decision = evaluate_and_decide(
+            f'gs://{BUCKET_NAME}/models/crop_classifier_latest/model.joblib'
+        )
+        
+        # Step 7: Deploy only if decision is positive
+        model_id = None
+        endpoint_id = None
+        deployment_status = "blocked"
+        
+        if decision['should_deploy']:
+            logger.info("🚀 Step 7: Deploying challenger (passed all gates)...")
+            model, endpoint = deploy_model_to_vertex_ai(model_gcs_path, endpoint_id=None)
+            
+            # Extract IDs from resource names
+            endpoint_id = endpoint.name.split('/')[-1]
+            model_id = model.name.split('/')[-1]
+            deployment_status = "deployed"
+            
+            logger.info(f"✅ Challenger deployed as new champion!")
+            logger.info(f"   Model ID: {model_id}")
+            logger.info(f"   Endpoint ID: {endpoint_id}")
+        else:
+            logger.warning("⛔ Step 7: Deployment blocked - challenger did not pass gates")
+            logger.warning("   Current champion remains in production")
+            for reason in decision['reasoning']:
+                logger.warning(f"   {reason}")
         
         # Calculate duration
         duration = (datetime.now() - start_time).total_seconds() / 60
         
+        # Compile response
         logger.info("=" * 60)
-        logger.info("✅ RETRAINING COMPLETE")
+        logger.info("✅ RETRAINING PIPELINE COMPLETE")
         logger.info("=" * 60)
         logger.info(f"⏱️  Duration: {duration:.1f} minutes")
         logger.info(f"📊 Training samples: {quality_report['total_samples']}")
-        logger.info(f"🎯 Test accuracy: {test_accuracy:.2%}")
-        logger.info(f"🤖 Model: {model.display_name} (ID: {model_id})")
-        logger.info(f"🚀 Endpoint: {endpoint.display_name} (ID: {endpoint_id})")
+        logger.info(f"🎯 Deployment: {deployment_status.upper()}")
         
         return {
             'status': 'success',
+            'deployment_status': deployment_status,
+            'should_deploy': decision['should_deploy'],
+            'deployment_decision': decision,
             'model_gcs_path': model_gcs_path,
             'model_name': 'crop-classifier-latest',
             'model_id': model_id,
             'endpoint_id': endpoint_id,
-            'endpoint_name': endpoint.name,
-            'endpoint_display_name': endpoint.display_name,
             'training_samples': quality_report['total_samples'],
             'crops': quality_report['crops'],
-            'metrics': {
+            'training_metrics': {
                 'train_accuracy': metrics['train_accuracy'],
                 'test_accuracy': metrics['test_accuracy'],
                 'n_train_samples': metrics['n_train_samples'],
