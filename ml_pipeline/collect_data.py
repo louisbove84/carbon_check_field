@@ -68,8 +68,8 @@ def collect_training_data():
         ndvi_early = get_sentinel2_composite(early_start, early_end)
         ndvi_late = get_sentinel2_composite(late_start, late_end)
         
-        # Get CDL
-        cdl_year = end_date.year
+        # Get CDL (use previous year - CDL data typically has 1-year delay)
+        cdl_year = end_date.year - 1
         cdl = ee.Image(f'USDA/NASS/CDL/{cdl_year}')
         logger.info(f"📊 Using CDL year: {cdl_year}")
         
