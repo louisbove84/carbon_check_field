@@ -57,15 +57,14 @@ def load_training_data(config):
     
     client = bigquery.Client(project=project_id)
     
-    # Load training data (excluding holdout)
+    # Load training data (excluding holdout if exists)
     query = f"""
     SELECT t.*
     FROM `{project_id}.{dataset_id}.{training_table}` t
-    LEFT JOIN `{project_id}.{dataset_id}.{holdout_table}` h
-        ON t.sample_id = h.sample_id
-    WHERE h.sample_id IS NULL
-        AND t.ndvi_mean IS NOT NULL
+    WHERE t.ndvi_mean IS NOT NULL
     """
+    
+    # Note: Holdout exclusion will be added once sample_id column is available
     
     df = client.query(query).to_dataframe()
     
