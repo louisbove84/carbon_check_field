@@ -74,15 +74,8 @@ OPTIONS(
   description="History of model deployments and deployment decisions"
 );
 
--- Create indexes for faster queries
-CREATE INDEX IF NOT EXISTS idx_holdout_crop 
-ON `ml-pipeline-477612.crop_ml.holdout_test_set`(crop);
-
-CREATE INDEX IF NOT EXISTS idx_performance_time 
-ON `ml-pipeline-477612.crop_ml.model_performance`(evaluation_time DESC);
-
-CREATE INDEX IF NOT EXISTS idx_deployment_time 
-ON `ml-pipeline-477612.crop_ml.deployment_history`(deployment_time DESC);
+-- Note: BigQuery automatically indexes partitioned columns and clustering keys
+-- No explicit CREATE INDEX needed
 
 -- Sample query to compare recent champion vs challenger
 -- ============================================================
