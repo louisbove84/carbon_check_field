@@ -48,9 +48,9 @@ def collect_training_data():
     logger.info(f"   Crops: {[c['name'] for c in crops]}")
     
     try:
-        # Initialize Earth Engine
+        # Initialize Earth Engine with project ID
         logger.info("🌍 Initializing Earth Engine...")
-        ee.Initialize()
+        ee.Initialize(project=project_id)
         
         # Define date ranges
         end_date = datetime.now()
