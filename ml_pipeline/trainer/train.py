@@ -162,8 +162,8 @@ def train_model(df, feature_cols, config):
     return pipeline, metrics
 
 
-def save_model(pipeline, feature_cols, config):
-    """Save model to Cloud Storage."""
+def save_model(pipeline, feature_cols, metrics, config):
+    """Save model and metrics to Cloud Storage."""
     logger.info("💾 Saving model to Cloud Storage...")
     
     bucket_name = config['storage']['bucket']
@@ -175,11 +175,15 @@ def save_model(pipeline, feature_cols, config):
     # Save model files
     model_path = os.path.join(output_dir, 'model.joblib')
     features_path = os.path.join(output_dir, 'feature_cols.json')
+    metrics_path = os.path.join(output_dir, 'metrics.json')
     
     joblib.dump(pipeline, model_path, protocol=4)
     
     with open(features_path, 'w') as f:
         json.dump(feature_cols, f)
+    
+    with open(metrics_path, 'w') as f:
+        json.dump(metrics, f, default=str)
     
     logger.info(f"✅ Model saved to {model_path}")
     
@@ -193,11 +197,13 @@ def save_model(pipeline, feature_cols, config):
     archive_prefix = f'models/crop_classifier_archive/crop_classifier_{timestamp}'
     bucket.blob(f'{archive_prefix}/model.joblib').upload_from_filename(model_path)
     bucket.blob(f'{archive_prefix}/feature_cols.json').upload_from_filename(features_path)
+    bucket.blob(f'{archive_prefix}/metrics.json').upload_from_filename(metrics_path)
     
     # Latest
     latest_prefix = 'models/crop_classifier_latest'
     bucket.blob(f'{latest_prefix}/model.joblib').upload_from_filename(model_path)
     bucket.blob(f'{latest_prefix}/feature_cols.json').upload_from_filename(features_path)
+    bucket.blob(f'{latest_prefix}/metrics.json').upload_from_filename(metrics_path)
     
     logger.info(f"✅ Model also saved to gs://{bucket_name}/{latest_prefix}")
 
@@ -222,8 +228,8 @@ if __name__ == '__main__':
         # Train model
         pipeline, metrics = train_model(df_enhanced, feature_cols, config)
         
-        # Save model
-        save_model(pipeline, feature_cols, config)
+        # Save model and metrics
+        save_model(pipeline, feature_cols, metrics, config)
         
         # Output metrics (Vertex AI will capture this)
         duration = (datetime.now() - start_time).total_seconds() / 60
