@@ -289,9 +289,52 @@ def get_training_metrics(job, vertex_bucket):
         }
 
 
+def get_current_model_metrics():
+    """
+    Get metrics for the current production model (champion).
+    
+    Returns:
+        dict with current model metrics, or None if no model exists
+    """
+    try:
+        client = storage.Client()
+        bucket = client.bucket('carboncheck-data')
+        
+        # Try to get metrics from the archived model (previous deployment)
+        # Look for the most recent archive before the current training run
+        blobs = list(bucket.list_blobs(prefix='models/crop_classifier_archive/'))
+        
+        if not blobs:
+            logger.info("   No previous model found in archive")
+            return None
+        
+        # Sort by creation time to get the latest
+        blobs.sort(key=lambda x: x.time_created, reverse=True)
+        
+        # Look for metrics.json in the most recent archives
+        for blob in blobs[:5]:  # Check last 5 archived models
+            if 'metrics.json' in blob.name:
+                try:
+                    content = blob.download_as_text()
+                    metrics = json.loads(content)
+                    logger.info(f"   Found champion metrics: {blob.name}")
+                    return metrics
+                except Exception as e:
+                    logger.debug(f"   Failed to load {blob.name}: {e}")
+                    continue
+        
+        logger.info("   No champion metrics found")
+        return None
+        
+    except Exception as e:
+        logger.warning(f"   Could not load champion metrics: {e}")
+        return None
+
+
 def evaluate_and_deploy(training_result):
     """
     Evaluate model and deploy if quality gates pass.
+    Compare new model (challenger) vs current production model (champion).
     
     Args:
         training_result: Results from training job
@@ -301,13 +344,41 @@ def evaluate_and_deploy(training_result):
     """
     try:
         gates = config['quality_gates']
-        accuracy = training_result['accuracy']
+        challenger_accuracy = training_result['accuracy']
         
-        logger.info(f"   Model accuracy: {accuracy:.2%}")
-        logger.info(f"   Minimum required: {gates['absolute_min_accuracy']:.0%}")
+        logger.info(f"   Challenger (New Model):")
+        logger.info(f"   - Accuracy: {challenger_accuracy:.2%}")
+        logger.info(f"   - Training samples: {training_result['metrics'].get('n_train_samples', 'N/A')}")
+        logger.info("")
+        
+        # Get current production model metrics
+        champion_metrics = get_current_model_metrics()
+        
+        if champion_metrics:
+            champion_accuracy = champion_metrics.get('test_accuracy', champion_metrics.get('accuracy', 0))
+            logger.info(f"   Champion (Current Production):")
+            logger.info(f"   - Accuracy: {champion_accuracy:.2%}")
+            logger.info(f"   - Training samples: {champion_metrics.get('n_train_samples', 'N/A')}")
+            logger.info("")
+            
+            # Compare
+            improvement = challenger_accuracy - champion_accuracy
+            logger.info(f"   📊 COMPARISON:")
+            if improvement > 0:
+                logger.info(f"   ✅ Challenger is BETTER by {improvement:.2%}")
+            elif improvement < 0:
+                logger.info(f"   ⚠️  Challenger is WORSE by {abs(improvement):.2%}")
+            else:
+                logger.info(f"   ➡️  Challenger is SAME as champion")
+            logger.info("")
+        else:
+            logger.info(f"   No current model found - this will be the first deployment")
+            logger.info("")
         
         # Check quality gates
-        if accuracy >= gates['absolute_min_accuracy']:
+        logger.info(f"   Minimum required: {gates['absolute_min_accuracy']:.0%}")
+        
+        if challenger_accuracy >= gates['absolute_min_accuracy']:
             logger.info("   ✅ Quality gates passed")
             
             # Deploy to Vertex AI endpoint
@@ -320,15 +391,17 @@ def evaluate_and_deploy(training_result):
             return {
                 'status': 'success',
                 'deployed': True,
-                'accuracy': accuracy
+                'accuracy': challenger_accuracy,
+                'champion_accuracy': champion_metrics.get('test_accuracy', 0) if champion_metrics else None,
+                'improvement': improvement if champion_metrics else None
             }
         else:
             logger.warning("   ❌ Quality gates failed")
             return {
                 'status': 'success',
                 'deployed': False,
-                'accuracy': accuracy,
-                'reason': f'Accuracy {accuracy:.2%} < minimum {gates["absolute_min_accuracy"]:.0%}'
+                'accuracy': challenger_accuracy,
+                'reason': f'Accuracy {challenger_accuracy:.2%} < minimum {gates["absolute_min_accuracy"]:.0%}'
             }
     
     except Exception as e:
