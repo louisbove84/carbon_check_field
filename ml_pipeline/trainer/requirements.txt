@@ -19,6 +19,12 @@ joblib>=1.3.0
 matplotlib>=3.7.0
 seaborn>=0.12.0
 
+# TensorBoard
+tensorboard>=2.14.0
+torch>=2.0.0  # For SummaryWriter
+pillow>=10.0.0  # For image handling
+gcsfs>=2023.6.0  # For TensorBoard GCS access
+
 # Configuration
 PyYAML>=6.0.1
 

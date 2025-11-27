@@ -23,6 +23,7 @@ import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend for server
 import matplotlib.pyplot as plt
 import seaborn as sns
+import numpy as np
 from datetime import datetime
 from google.cloud import bigquery, storage, aiplatform
 from sklearn.ensemble import RandomForestClassifier
@@ -30,6 +31,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
+from torch.utils.tensorboard import SummaryWriter
+import io
+from PIL import Image
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -183,81 +187,115 @@ def generate_confusion_matrix(y_true, y_pred, labels, output_path):
     logger.info(f"✅ Confusion matrix saved to {output_path}")
 
 
-def log_to_vertex_experiments(config, metrics, y_test, y_pred, output_dir):
-    """Log metrics and artifacts to Vertex AI Experiments."""
+def log_to_tensorboard(config, metrics, y_test, y_pred, output_dir):
+    """Log metrics and visualizations to TensorBoard."""
     try:
         project_id = config['project']['id']
-        region = config['project']['region']
         
-        # Initialize Vertex AI
-        aiplatform.init(project=project_id, location=region)
+        # Use Vertex AI's managed TensorBoard path if available
+        # This environment variable is set automatically when the training job
+        # is associated with a TensorBoard instance
+        tensorboard_log_dir = os.environ.get('AIP_TENSORBOARD_LOG_DIR')
         
-        # Create or get experiment
-        experiment_name = 'crop-classifier-training'
+        if tensorboard_log_dir:
+            logger.info(f"📊 Using Vertex AI managed TensorBoard: {tensorboard_log_dir}")
+        else:
+            # Fallback to custom GCS path
+            bucket_name = config['storage']['bucket']
+            run_name = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            tensorboard_log_dir = f"gs://{bucket_name}/tensorboard_logs/{run_name}"
+            logger.info(f"📊 Using custom TensorBoard path: {tensorboard_log_dir}")
         
-        try:
-            experiment = aiplatform.Experiment.create(
-                experiment_name=experiment_name,
-                description='Crop classification model training experiments'
-            )
-            logger.info(f"✅ Created new experiment: {experiment_name}")
-        except:
-            experiment = aiplatform.Experiment(experiment_name=experiment_name)
-            logger.info(f"✅ Using existing experiment: {experiment_name}")
+        # Create TensorBoard writer
+        writer = SummaryWriter(log_dir=tensorboard_log_dir)
         
-        # Start a new run with timestamp
-        run_name = f"training-run-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-        aiplatform.start_run(run_name)
-        
-        logger.info(f"📊 Logging to Vertex AI Experiments: {run_name}")
-        
-        # Log parameters
-        aiplatform.log_params({
+        # Log hyperparameters
+        hparams = {
             'n_estimators': config['model']['hyperparameters']['n_estimators'],
             'max_depth': config['model']['hyperparameters']['max_depth'],
             'min_samples_split': config['model']['hyperparameters']['min_samples_split'],
             'n_train_samples': metrics['n_train_samples'],
             'n_test_samples': metrics['n_test_samples']
-        })
+        }
         
-        # Log metrics
-        aiplatform.log_metrics({
-            'train_accuracy': metrics['train_accuracy'],
-            'test_accuracy': metrics['test_accuracy'],
-        })
+        # Log scalar metrics
+        writer.add_scalar('accuracy/train', metrics['train_accuracy'], 0)
+        writer.add_scalar('accuracy/test', metrics['test_accuracy'], 0)
         
-        # Log per-crop F1 scores
+        # Log per-crop metrics
         report = metrics['classification_report']
-        for crop in sorted(set(y_test)):
+        crops = sorted([c for c in set(y_test)])
+        
+        for crop in crops:
             if crop in report:
-                aiplatform.log_metrics({
-                    f'{crop}_f1': report[crop]['f1-score'],
-                    f'{crop}_precision': report[crop]['precision'],
-                    f'{crop}_recall': report[crop]['recall']
-                })
+                writer.add_scalar(f'f1_score/{crop}', report[crop]['f1-score'], 0)
+                writer.add_scalar(f'precision/{crop}', report[crop]['precision'], 0)
+                writer.add_scalar(f'recall/{crop}', report[crop]['recall'], 0)
         
-        # Generate and log confusion matrix
+        # Generate and log confusion matrix as image
+        cm = confusion_matrix(y_test, y_pred, labels=crops)
+        
+        # Create confusion matrix figure
+        fig, ax = plt.subplots(figsize=(10, 8))
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                    xticklabels=crops, yticklabels=crops, ax=ax)
+        ax.set_title('Confusion Matrix', fontsize=16, pad=20)
+        ax.set_ylabel('True Label', fontsize=12)
+        ax.set_xlabel('Predicted Label', fontsize=12)
+        
+        # Convert matplotlib figure to image tensor for TensorBoard
+        buf = io.BytesIO()
+        fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+        buf.seek(0)
+        image = Image.open(buf)
+        image_array = np.array(image)
+        
+        # TensorBoard expects (C, H, W) format
+        if len(image_array.shape) == 3:
+            image_array = np.transpose(image_array, (2, 0, 1))
+        
+        writer.add_image('confusion_matrix', image_array, 0)
+        plt.close(fig)
+        
+        # Also save confusion matrix to output directory for GCS upload
         cm_path = os.path.join(output_dir, 'confusion_matrix.png')
-        generate_confusion_matrix(y_test, y_pred, sorted(set(y_test)), cm_path)
+        generate_confusion_matrix(y_test, y_pred, crops, cm_path)
         
-        # Log confusion matrix as artifact
-        aiplatform.log_artifact(cm_path)
+        # Log text summary
+        report_text = f"""
+        Training Summary
+        ================
+        Train Accuracy: {metrics['train_accuracy']:.2%}
+        Test Accuracy: {metrics['test_accuracy']:.2%}
         
-        # Log classification report as artifact
+        Per-Crop F1 Scores:
+        {''.join([f'- {crop}: {report[crop]["f1-score"]:.2%}' + chr(10) for crop in crops if crop in report])}
+        """
+        writer.add_text('training_summary', report_text, 0)
+        
+        # Log hyperparameters with metrics
+        metric_dict = {
+            'hparam/train_accuracy': metrics['train_accuracy'],
+            'hparam/test_accuracy': metrics['test_accuracy'],
+        }
+        writer.add_hparams(hparams, metric_dict)
+        
+        # Save classification report
         report_path = os.path.join(output_dir, 'classification_report.json')
         with open(report_path, 'w') as f:
             json.dump(report, f, indent=2, default=str)
-        aiplatform.log_artifact(report_path)
         
-        # End the run
-        aiplatform.end_run()
+        writer.close()
         
-        logger.info("✅ Logged to Vertex AI Experiments")
-        logger.info(f"   View: https://console.cloud.google.com/vertex-ai/experiments/experiments/{experiment_name}?project={project_id}")
+        logger.info("✅ Logged to TensorBoard")
+        logger.info(f"   Logs: {tensorboard_log_dir}")
+        logger.info(f"   View: https://console.cloud.google.com/vertex-ai/tensorboard?project={project_id}")
         
     except Exception as e:
-        logger.warning(f"⚠️  Failed to log to Vertex AI Experiments: {e}")
-        logger.warning("   Training will continue, but metrics won't be in Experiments")
+        logger.warning(f"⚠️  Failed to log to TensorBoard: {e}")
+        logger.warning("   Training will continue, but metrics won't be in TensorBoard")
+        import traceback
+        traceback.print_exc()
 
 
 def save_model(pipeline, feature_cols, metrics, config):
@@ -330,8 +368,8 @@ if __name__ == '__main__':
         output_dir = os.environ.get('AIP_MODEL_DIR', '/tmp/model')
         os.makedirs(output_dir, exist_ok=True)
         
-        # Log to Vertex AI Experiments
-        log_to_vertex_experiments(config, metrics, y_test, y_pred, output_dir)
+        # Log to TensorBoard
+        log_to_tensorboard(config, metrics, y_test, y_pred, output_dir)
         
         # Save model and metrics
         save_model(pipeline, feature_cols, metrics, config)

@@ -189,13 +189,24 @@ def trigger_training_job():
             staging_bucket=f'gs://{vertex_bucket}/staging'
         )
         
-        # Run training job
+        # Get TensorBoard instance resource name
+        tensorboard_id = '8764605208211750912'
+        tensorboard_name = f'projects/{project_id}/locations/{region}/tensorboards/{tensorboard_id}'
+        
+        # Service account for training job
+        service_account = f'ml-pipeline-sa@{project_id}.iam.gserviceaccount.com'
+        
+        # Run training job with TensorBoard
         logger.info("   Starting training job on Vertex AI...")
+        logger.info(f"   TensorBoard ID: {tensorboard_id}")
+        logger.info(f"   Service account: {service_account}")
         model = job.run(
             replica_count=1,
             machine_type=machine_type,
             accelerator_count=0,
-            base_output_dir=f'gs://{vertex_bucket}/training_output'
+            base_output_dir=f'gs://{vertex_bucket}/training_output',
+            tensorboard=tensorboard_name,
+            service_account=service_account
         )
         
         logger.info("   ✅ Training job complete")
