@@ -38,12 +38,21 @@ app = FastAPI(
 )
 
 # CORS - Allow Flutter app to call this API
+# Note: When allow_credentials=True, cannot use allow_origins=["*"]
+# Must explicitly list allowed origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, restrict to your app domain
+    allow_origins=[
+        "http://localhost:8080",
+        "http://localhost:3000",
+        "http://127.0.0.1:8080",
+        "http://127.0.0.1:3000",
+        # Add your production domain here when deploying
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # Initialize Earth Engine with Application Default Credentials

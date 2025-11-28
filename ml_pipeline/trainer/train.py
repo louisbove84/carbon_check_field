@@ -195,19 +195,35 @@ def log_to_tensorboard(config, metrics, y_test, y_pred, output_dir):
         # Use Vertex AI's managed TensorBoard path if available
         # This environment variable is set automatically when the training job
         # is associated with a TensorBoard instance
-        tensorboard_log_dir = os.environ.get('AIP_TENSORBOARD_LOG_DIR')
+        tensorboard_gcs_path = os.environ.get('AIP_TENSORBOARD_LOG_DIR')
         
-        if tensorboard_log_dir:
-            logger.info(f"📊 Using Vertex AI managed TensorBoard: {tensorboard_log_dir}")
+        # Debug: Log all TensorBoard-related environment variables
+        logger.info("🔍 Checking TensorBoard environment variables...")
+        tb_env_vars = {k: v for k, v in os.environ.items() if 'TENSORBOARD' in k or 'AIP' in k}
+        if tb_env_vars:
+            logger.info(f"   Found TensorBoard env vars: {list(tb_env_vars.keys())}")
+        else:
+            logger.warning("   No TensorBoard environment variables found")
+        
+        # SummaryWriter cannot write directly to GCS, so we write locally first
+        # then upload to GCS
+        local_log_dir = os.path.join(output_dir, 'tensorboard_logs')
+        os.makedirs(local_log_dir, exist_ok=True)
+        
+        if tensorboard_gcs_path:
+            logger.info(f"📊 Using Vertex AI managed TensorBoard: {tensorboard_gcs_path}")
+            logger.info(f"   Writing logs locally to: {local_log_dir}")
         else:
             # Fallback to custom GCS path
             bucket_name = config['storage']['bucket']
             run_name = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            tensorboard_log_dir = f"gs://{bucket_name}/tensorboard_logs/{run_name}"
-            logger.info(f"📊 Using custom TensorBoard path: {tensorboard_log_dir}")
+            tensorboard_gcs_path = f"gs://{bucket_name}/tensorboard_logs/{run_name}"
+            logger.warning(f"⚠️  AIP_TENSORBOARD_LOG_DIR not set, using fallback path")
+            logger.info(f"📊 Using custom TensorBoard path: {tensorboard_gcs_path}")
+            logger.info(f"   Writing logs locally to: {local_log_dir}")
         
-        # Create TensorBoard writer
-        writer = SummaryWriter(log_dir=tensorboard_log_dir)
+        # Create TensorBoard writer (must use local path)
+        writer = SummaryWriter(log_dir=local_log_dir)
         
         # Log hyperparameters
         hparams = {
@@ -287,8 +303,60 @@ def log_to_tensorboard(config, metrics, y_test, y_pred, output_dir):
         
         writer.close()
         
+        # Upload TensorBoard logs to GCS if TensorBoard path is provided
+        if tensorboard_gcs_path and tensorboard_gcs_path.startswith('gs://'):
+            logger.info(f"📤 Uploading TensorBoard logs to GCS...")
+            try:
+                # storage is already imported at top of file
+                
+                # Parse GCS path
+                # Format: gs://bucket-name/path/to/logs
+                gcs_path_parts = tensorboard_gcs_path.replace('gs://', '').split('/', 1)
+                bucket_name = gcs_path_parts[0]
+                gcs_prefix = gcs_path_parts[1] if len(gcs_path_parts) > 1 else ''
+                
+                # Upload all files from local_log_dir to GCS
+                storage_client = storage.Client()
+                bucket = storage_client.bucket(bucket_name)
+                
+                # Check if local directory has files
+                files_to_upload = []
+                for root, dirs, files in os.walk(local_log_dir):
+                    for file in files:
+                        local_file_path = os.path.join(root, file)
+                        files_to_upload.append(local_file_path)
+                
+                if not files_to_upload:
+                    logger.warning("   No TensorBoard log files found to upload")
+                else:
+                    logger.info(f"   Found {len(files_to_upload)} files to upload")
+                    
+                    # Walk through local directory and upload files
+                    uploaded_count = 0
+                    for local_file_path in files_to_upload:
+                        # Get relative path from local_log_dir
+                        relative_path = os.path.relpath(local_file_path, local_log_dir)
+                        # Construct GCS blob path
+                        if gcs_prefix:
+                            gcs_blob_path = f"{gcs_prefix}/{relative_path}".replace('\\', '/')
+                        else:
+                            gcs_blob_path = relative_path.replace('\\', '/')
+                        
+                        blob = bucket.blob(gcs_blob_path)
+                        blob.upload_from_filename(local_file_path)
+                        uploaded_count += 1
+                        if uploaded_count <= 5:  # Log first 5 files
+                            logger.debug(f"   Uploaded: {gcs_blob_path}")
+                    
+                    logger.info(f"✅ Uploaded {uploaded_count} TensorBoard log files to {tensorboard_gcs_path}")
+            except Exception as upload_error:
+                logger.warning(f"⚠️  Failed to upload TensorBoard logs to GCS: {upload_error}")
+                logger.warning("   Logs are available locally but may not appear in TensorBoard UI")
+        
         logger.info("✅ Logged to TensorBoard")
-        logger.info(f"   Logs: {tensorboard_log_dir}")
+        logger.info(f"   Local logs: {local_log_dir}")
+        if tensorboard_gcs_path:
+            logger.info(f"   GCS logs: {tensorboard_gcs_path}")
         logger.info(f"   View: https://console.cloud.google.com/vertex-ai/tensorboard?project={project_id}")
         
     except Exception as e:
