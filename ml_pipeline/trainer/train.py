@@ -34,6 +34,7 @@ from sklearn.metrics import classification_report, accuracy_score, confusion_mat
 from torch.utils.tensorboard import SummaryWriter
 import io
 from PIL import Image
+from feature_engineering import engineer_features_dataframe, compute_elevation_quantiles
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -83,28 +84,43 @@ def load_training_data(config):
 
 
 def engineer_features(df, config):
-    """Create derived features."""
+    """Create derived features using shared feature engineering module."""
     logger.info("🔧 Engineering features...")
     
-    df = df.copy()
+    # Compute elevation quantiles from training data
+    elevation_quantiles = compute_elevation_quantiles(df)
+    logger.info(f"   Elevation quantiles: {elevation_quantiles}")
     
-    # Derived features
-    df['ndvi_range'] = df['ndvi_max'] - df['ndvi_min']
-    df['ndvi_iqr'] = df['ndvi_p75'] - df['ndvi_p25']
-    df['ndvi_change'] = df['ndvi_late'] - df['ndvi_early']
-    df['ndvi_early_ratio'] = df['ndvi_early'] / (df['ndvi_mean'] + 0.001)
-    df['ndvi_late_ratio'] = df['ndvi_late'] / (df['ndvi_mean'] + 0.001)
+    # Save quantiles to config for use in prediction API
+    try:
+        client = storage.Client()
+        bucket = client.bucket(config['storage']['bucket'])
+        blob = bucket.blob('config/config.yaml')
+        if blob.exists():
+            import yaml
+            config_dict = yaml.safe_load(blob.download_as_text())
+            if 'features' not in config_dict:
+                config_dict['features'] = {}
+            config_dict['features']['elevation_quantiles'] = elevation_quantiles
+            # Update base_columns to reflect new feature structure
+            config_dict['features']['base_columns'] = [
+                'ndvi_mean', 'ndvi_std', 'ndvi_min', 'ndvi_max',
+                'ndvi_p25', 'ndvi_p50', 'ndvi_p75', 'ndvi_early', 'ndvi_late',
+                'elevation_binned',  # Changed from elevation_m
+                'lat_sin', 'lat_cos', 'lon_sin', 'lon_cos'  # Changed from longitude, latitude
+            ]
+            # Save updated config
+            blob.upload_from_string(yaml.dump(config_dict, default_flow_style=False))
+            logger.info("✅ Updated config.yaml with elevation quantiles and new feature columns")
+    except Exception as e:
+        logger.warning(f"⚠️  Could not update config.yaml: {e}")
     
-    # All features
-    base_features = config['features']['base_columns']
-    all_features = base_features + [
-        'ndvi_range', 'ndvi_iqr', 'ndvi_change',
-        'ndvi_early_ratio', 'ndvi_late_ratio'
-    ]
+    # Use shared feature engineering
+    df_enhanced, all_features = engineer_features_dataframe(df, elevation_quantiles)
     
     logger.info(f"✅ Created {len(all_features)} features")
     
-    return df, all_features
+    return df_enhanced, all_features
 
 
 def train_model(df, feature_cols, config):

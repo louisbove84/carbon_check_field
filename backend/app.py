@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Tuple, Optional, Dict
 import ee
-from google.cloud import aiplatform
+from google.cloud import aiplatform, storage
 from google.auth.transport import requests
 from google.oauth2 import id_token
 import uvicorn
@@ -29,6 +29,25 @@ import math
 import numpy as np
 from shapely.geometry import Polygon, Point, box
 from shapely.ops import unary_union
+import sys
+import json
+
+# Add ml_pipeline to path to import shared feature engineering
+_ml_pipeline_path = os.path.join(os.path.dirname(__file__), '..', 'ml_pipeline', 'trainer')
+if os.path.exists(_ml_pipeline_path):
+    sys.path.insert(0, _ml_pipeline_path)
+    try:
+        from feature_engineering import engineer_features_from_raw, compute_elevation_quantiles
+    except ImportError as e:
+        print(f"⚠️  Could not import feature_engineering: {e}")
+        print("   Using fallback feature engineering...")
+        # Fallback - define functions inline if import fails
+        def engineer_features_from_raw(*args, **kwargs):
+            raise HTTPException(status_code=500, detail="Feature engineering module not available")
+else:
+    print(f"⚠️  Feature engineering module not found at {_ml_pipeline_path}")
+    def engineer_features_from_raw(*args, **kwargs):
+        raise HTTPException(status_code=500, detail="Feature engineering module not available")
 
 # Initialize FastAPI
 app = FastAPI(
@@ -71,6 +90,28 @@ VERTEX_AI_ENDPOINT = (
     "endpoints/2450616804754587648"  # crop-endpoint (active)
 )
 SENTINEL2_COLLECTION = "COPERNICUS/S2_SR_HARMONIZED"
+CONFIG_BUCKET = "carboncheck-data"
+
+# Load elevation quantiles from config (with defaults)
+def load_elevation_quantiles() -> Dict[str, float]:
+    """Load elevation quantiles from config, with defaults if not found."""
+    try:
+        client = storage.Client()
+        bucket = client.bucket(CONFIG_BUCKET)
+        blob = bucket.blob('config/config.yaml')
+        if blob.exists():
+            import yaml
+            config = yaml.safe_load(blob.download_as_text())
+            quantiles = config.get('features', {}).get('elevation_quantiles', {})
+            if quantiles:
+                return quantiles
+    except Exception as e:
+        print(f"⚠️ Could not load elevation quantiles from config: {e}")
+    
+    # Default quantiles (will be updated after first training run)
+    return {'q25': 200.0, 'q50': 500.0, 'q75': 1000.0}
+
+ELEVATION_QUANTILES = load_elevation_quantiles()
 
 # CO₂ carbon credit rates ($/acre/year) - 2025 market rates
 CARBON_RATES = {
@@ -101,7 +142,7 @@ class AnalyzeFieldRequest(BaseModel):
 class CropZone(BaseModel):
     """Individual crop zone within a field"""
     crop: str
-    confidence: float
+    confidence: Optional[float]  # None if confidence not available
     area_acres: float
     percentage: float
     polygon: List[List[float]]  # [[lng, lat], ...]
@@ -411,33 +452,22 @@ def compute_ndvi_features(polygon_coords: List[Tuple[float, float]], year: int) 
         longitude = centroid[0]
         latitude = centroid[1]
         
-        # Derived features
-        ndvi_range = ndvi_max - ndvi_min
-        ndvi_iqr = ndvi_p75 - ndvi_p25
-        ndvi_change = ndvi_late - ndvi_early
-        ndvi_early_ratio = ndvi_early / ndvi_mean if ndvi_mean > 0 else 1.0
-        ndvi_late_ratio = ndvi_late / ndvi_mean if ndvi_mean > 0 else 1.0
-        
-        # Return 17 features in exact order
-        features = [
-            ndvi_mean,
-            ndvi_std,
-            ndvi_min,
-            ndvi_max,
-            ndvi_p25,
-            ndvi_p50,
-            ndvi_p75,
-            ndvi_early,
-            ndvi_late,
-            elevation_m,
-            longitude,
-            latitude,
-            ndvi_range,
-            ndvi_iqr,
-            ndvi_change,
-            ndvi_early_ratio,
-            ndvi_late_ratio,
-        ]
+        # Use shared feature engineering (ensures consistency with training)
+        features = engineer_features_from_raw(
+            ndvi_mean=ndvi_mean,
+            ndvi_std=ndvi_std,
+            ndvi_min=ndvi_min,
+            ndvi_max=ndvi_max,
+            ndvi_p25=ndvi_p25,
+            ndvi_p50=ndvi_p50,
+            ndvi_p75=ndvi_p75,
+            ndvi_early=ndvi_early,
+            ndvi_late=ndvi_late,
+            elevation_m=elevation_m,
+            latitude=latitude,
+            longitude=longitude,
+            elevation_quantiles=ELEVATION_QUANTILES
+        )
         
         return features
     
@@ -456,12 +486,13 @@ def compute_ndvi_features(polygon_coords: List[Tuple[float, float]], year: int) 
 def predict_crop_type(features: List[float]) -> Tuple[str, float]:
     """
     Call Vertex AI endpoint to predict crop type from features.
+    Uses predict_proba to get real confidence scores.
     
     Args:
-        features: List of 17 NDVI features
+        features: List of 19 engineered features
     
     Returns:
-        Tuple of (crop_name, confidence_score)
+        Tuple of (crop_name, confidence_score) where confidence is the max probability
     """
     try:
         # Initialize Vertex AI client
@@ -471,29 +502,114 @@ def predict_crop_type(features: List[float]) -> Tuple[str, float]:
         endpoint = aiplatform.Endpoint(VERTEX_AI_ENDPOINT)
         
         # Make prediction
+        # Note: sklearn-cpu container may only return class predictions, not probabilities
+        # We'll try to extract probabilities if available, otherwise use fallback
         prediction = endpoint.predict(instances=[features])
         
-        # Parse response
-        if prediction.predictions:
-            pred = prediction.predictions[0]
-            
-            # Handle different response formats
-            if isinstance(pred, str):
-                crop = pred
-                confidence = 0.95  # Default confidence
-            elif isinstance(pred, list) and len(pred) >= 1:
-                crop = pred[0]
-                confidence = pred[1] if len(pred) > 1 else 0.95
+        # Log full response for debugging (first few calls)
+        if not hasattr(predict_crop_type, '_logged_response'):
+            print(f"🔍 Prediction response type: {type(prediction)}")
+            print(f"🔍 Prediction attributes: {dir(prediction)}")
+            if hasattr(prediction, 'predictions'):
+                print(f"🔍 Predictions: {prediction.predictions}")
+            if hasattr(prediction, 'probabilities'):
+                print(f"🔍 Probabilities: {prediction.probabilities}")
+            predict_crop_type._logged_response = True
+        
+        # Parse response - sklearn container format
+        if not prediction.predictions:
+            raise HTTPException(status_code=500, detail="No predictions returned")
+        
+        pred = prediction.predictions[0]
+        crop = None
+        confidence = None  # No default - return None if not available
+        
+        # Try to get probabilities from prediction object
+        # sklearn containers may return probabilities in different formats
+        try:
+            # Method 1: Check if prediction object has probabilities attribute
+            if hasattr(prediction, 'probabilities') and prediction.probabilities:
+                probs = prediction.probabilities[0]
+                if isinstance(probs, (list, np.ndarray)):
+                    confidence = float(max(probs))  # Max probability
+                    print(f"✅ Extracted confidence from probabilities: {confidence:.2%}")
+        except Exception as e:
+            print(f"⚠️  Method 1 failed: {e}")
+        
+        # If still None, try other methods
+        if confidence is None:
+            try:
+                # Method 2: Check if pred is a dict with probabilities
+                if isinstance(pred, dict) and 'probabilities' in pred:
+                    probs = pred['probabilities']
+                    if isinstance(probs, list) and len(probs) > 0:
+                        if isinstance(probs[0], list):
+                            confidence = float(max(probs[0]))
+                        else:
+                            confidence = float(max(probs))
+                    print(f"✅ Extracted confidence from dict probabilities: {confidence:.2%}")
+            except Exception as e:
+                print(f"⚠️  Method 2 failed: {e}")
+        
+        # If still None, log warning (but don't fake a value)
+        if confidence is None:
+            print(f"⚠️  No confidence/probabilities available in response - returning None")
+            print(f"   Response format: {type(pred)}, Value: {pred}")
+        
+        # Extract crop prediction
+        if isinstance(pred, dict):
+            # Dict format: {"predictions": ["Corn"], ...}
+            if 'predictions' in pred:
+                crop_list = pred['predictions']
+                crop = str(crop_list[0]) if isinstance(crop_list, list) and crop_list else str(pred.get('prediction', pred))
+            else:
+                crop = str(pred.get('prediction', pred.get('crop', pred)))
+            # Try to get confidence from dict (only if not already set)
+            if confidence is None:
+                if 'probabilities' in pred:
+                    probs = pred['probabilities']
+                    if isinstance(probs, list) and len(probs) > 0:
+                        if isinstance(probs[0], list):
+                            confidence = float(max(probs[0]))
+                        elif isinstance(probs[0], (int, float)):
+                            confidence = float(probs[0])
+                elif 'confidence' in pred:
+                    confidence = float(pred['confidence'])
+        elif isinstance(pred, list):
+            # List format: ["Corn"] or ["Corn", probabilities]
+            if len(pred) >= 1:
+                crop = str(pred[0])
+                if len(pred) >= 2 and confidence is None:
+                    if isinstance(pred[1], list):
+                        # Second element is probability array
+                        confidence = float(max(pred[1]))
+                    elif isinstance(pred[1], (int, float)):
+                        # Second element is confidence score
+                        confidence = float(pred[1])
             else:
                 crop = str(pred)
-                confidence = 0.95
-            
-            return crop, confidence
+        elif isinstance(pred, str):
+            # String format: "Corn"
+            crop = pred
         else:
-            raise HTTPException(status_code=500, detail="No predictions returned")
+            # Fallback
+            crop = str(pred)
+        
+        # Ensure confidence is between 0 and 1 (only if we have a value)
+        if confidence is not None:
+            confidence = max(0.0, min(1.0, confidence))
+            print(f"🔮 Prediction: {crop} (confidence: {confidence:.2%})")
+        else:
+            print(f"🔮 Prediction: {crop} (confidence: None - not available)")
+        
+        return crop, confidence
     
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error predicting crop: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=500,
             detail=f"Vertex AI prediction failed: {str(e)}"
@@ -666,7 +782,9 @@ def group_adjacent_cells(cells: List[Dict], threshold_distance: float = 0.001) -
         # Calculate total area and average confidence
         total_area_m2 = sum(Polygon(cell['polygon']).area * 111320 * 111320 for cell in crop_cells)
         total_area_acres = total_area_m2 * 0.000247105
-        avg_confidence = sum(cell['confidence'] for cell in crop_cells) / len(crop_cells)
+        # Only average confidence if all cells have confidence values
+        confidences = [cell['confidence'] for cell in crop_cells if cell['confidence'] is not None]
+        avg_confidence = sum(confidences) / len(confidences) if confidences else None
         
         # Extract coordinates from merged polygon
         if hasattr(merged, 'geoms'):  # MultiPolygon
@@ -907,7 +1025,7 @@ async def analyze_field_grid(coords: List[Tuple[float, float]], area_acres: floa
         ),
         crop_zones=[CropZone(
             crop=zone['crop'],
-            confidence=round(zone['confidence'], 3),
+            confidence=round(zone['confidence'], 3) if zone['confidence'] is not None else None,
             area_acres=round(zone['area_acres'], 2),
             percentage=round(zone['percentage'], 1),
             polygon=zone['polygon']

@@ -127,6 +127,7 @@ quality_gates:
 # ============================================================
 features:
   # Base NDVI features from satellite imagery
+  # Updated to use sin/cos encoding for lat/long and binned elevation
   base_columns:
     - ndvi_mean
     - ndvi_std
@@ -137,9 +138,18 @@ features:
     - ndvi_p75
     - ndvi_early
     - ndvi_late
-    - elevation_m
-    - longitude
-    - latitude
+    - elevation_binned  # Binned elevation (0-3) instead of raw elevation_m
+    - lat_sin           # Sin/cos encoding instead of raw longitude
+    - lat_cos
+    - lon_sin
+    - lon_cos
+  
+  # Elevation quantiles (computed from training data, updated after each training run)
+  # These are used to bin elevation consistently between training and prediction
+  elevation_quantiles:
+    q25: 200.0   # 25th percentile - will be updated from training data
+    q50: 500.0   # 50th percentile (median)
+    q75: 1000.0  # 75th percentile
 
 # ============================================================
 # NOTES
