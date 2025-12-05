@@ -4,17 +4,17 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install dependencies (no ML libraries - keeps image small!)
-COPY requirements.txt .
+COPY orchestrator/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application files
-COPY main.py .
-COPY orchestrator.py .
-COPY earth_engine_collector.py .
-COPY config.yaml .
+# Copy shared modules directory first (from parent ml_pipeline/)
+COPY shared /app/shared
 
-# Copy shared modules directory
-COPY ../shared /app/shared
+# Copy orchestrator application files
+COPY orchestrator/main.py .
+COPY orchestrator/orchestrator.py .
+COPY orchestrator/earth_engine_collector.py .
+COPY orchestrator/config.yaml .
 
 # Environment variables
 ENV PORT=8080

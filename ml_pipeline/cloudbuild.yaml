@@ -1,0 +1,43 @@
+steps:
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/ml-orchestrator'
+      - '-f'
+      - 'orchestrator/Dockerfile'
+      - '.'
+  
+  # Push the container image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/ml-orchestrator'
+  
+  # Deploy container image to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'ml-pipeline'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/ml-orchestrator'
+      - '--region'
+      - 'us-central1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--memory'
+      - '2Gi'
+      - '--cpu'
+      - '2'
+      - '--timeout'
+      - '3600'
+      - '--set-env-vars'
+      - 'GCP_PROJECT_ID=$PROJECT_ID'
+
+images:
+  - 'gcr.io/$PROJECT_ID/ml-orchestrator'
+
