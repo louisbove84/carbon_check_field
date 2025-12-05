@@ -111,17 +111,21 @@ def compute_ndvi_features_ee(
     # Get centroid coordinates
     centroid = geometry.centroid().coordinates()
     
+    # Use ee.Algorithms.If to provide defaults for missing NDVI values
+    # This prevents "Dictionary does not contain key" errors
+    default_ndvi = 0.5
+    
     return {
-        'ndvi_mean': ndvi_stats.get('NDVI_mean'),
-        'ndvi_std': ndvi_stats.get('NDVI_stdDev'),
-        'ndvi_min': ndvi_stats.get('NDVI_min'),
-        'ndvi_max': ndvi_stats.get('NDVI_max'),
-        'ndvi_p25': ndvi_stats.get('NDVI_p25'),
-        'ndvi_p50': ndvi_stats.get('NDVI_p50'),
-        'ndvi_p75': ndvi_stats.get('NDVI_p75'),
-        'ndvi_early': early_ndvi.get('NDVI'),
-        'ndvi_late': late_ndvi.get('NDVI'),
-        'elevation_m': elevation.get('elevation'),
+        'ndvi_mean': ee.Algorithms.If(ndvi_stats.contains('NDVI_mean'), ndvi_stats.get('NDVI_mean'), default_ndvi),
+        'ndvi_std': ee.Algorithms.If(ndvi_stats.contains('NDVI_stdDev'), ndvi_stats.get('NDVI_stdDev'), 0.1),
+        'ndvi_min': ee.Algorithms.If(ndvi_stats.contains('NDVI_min'), ndvi_stats.get('NDVI_min'), 0.0),
+        'ndvi_max': ee.Algorithms.If(ndvi_stats.contains('NDVI_max'), ndvi_stats.get('NDVI_max'), 1.0),
+        'ndvi_p25': ee.Algorithms.If(ndvi_stats.contains('NDVI_p25'), ndvi_stats.get('NDVI_p25'), 0.4),
+        'ndvi_p50': ee.Algorithms.If(ndvi_stats.contains('NDVI_p50'), ndvi_stats.get('NDVI_p50'), default_ndvi),
+        'ndvi_p75': ee.Algorithms.If(ndvi_stats.contains('NDVI_p75'), ndvi_stats.get('NDVI_p75'), 0.6),
+        'ndvi_early': ee.Algorithms.If(early_ndvi.contains('NDVI'), early_ndvi.get('NDVI'), default_ndvi),
+        'ndvi_late': ee.Algorithms.If(late_ndvi.contains('NDVI'), late_ndvi.get('NDVI'), default_ndvi),
+        'elevation_m': ee.Algorithms.If(elevation.contains('elevation'), elevation.get('elevation'), 0.0),
         'longitude': centroid.get(0),
         'latitude': centroid.get(1)
     }
