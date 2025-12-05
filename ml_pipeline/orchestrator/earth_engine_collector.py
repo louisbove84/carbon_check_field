@@ -13,15 +13,18 @@ from typing import List, Dict, Any
 from datetime import datetime
 from google.cloud import bigquery
 
-# Add shared module to path (both when run locally and in Docker)
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared'))
-sys.path.insert(0, '/app/shared')  # Docker path
+# Add shared module to Python path
+# Works both locally (../shared) and in Docker (/app/shared)
+shared_paths = [
+    os.path.join(os.path.dirname(__file__), '..', 'shared'),  # Local: ml_pipeline/shared
+    '/app/shared',  # Docker: /app/shared
+    os.path.join(os.path.dirname(__file__), '..', '..', 'shared')  # Alternative local path
+]
+for path in shared_paths:
+    if os.path.exists(path) and path not in sys.path:
+        sys.path.insert(0, path)
 
-try:
-    from earth_engine_features import compute_ndvi_features_ee_as_feature
-except ImportError:
-    # Fallback for Docker environment
-    from shared.earth_engine_features import compute_ndvi_features_ee_as_feature
+from earth_engine_features import compute_ndvi_features_ee_as_feature
 
 logger = logging.getLogger(__name__)
 
