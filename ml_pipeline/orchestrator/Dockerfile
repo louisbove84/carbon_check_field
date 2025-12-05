@@ -10,7 +10,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application files
 COPY main.py .
 COPY orchestrator.py .
+COPY earth_engine_collector.py .
 COPY config.yaml .
+
+# Copy shared modules directory
+COPY ../shared /app/shared
 
 # Environment variables
 ENV PORT=8080
