@@ -13,8 +13,10 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy training script
+# Copy training scripts and modules
 COPY train.py .
+COPY feature_engineering.py .
+COPY model_evaluation.py .
 
 # Vertex AI will set AIP_MODEL_DIR environment variable
 ENV PYTHONUNBUFFERED=1
