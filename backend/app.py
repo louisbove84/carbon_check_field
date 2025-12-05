@@ -32,8 +32,10 @@ from shapely.ops import unary_union
 import sys
 import json
 
-# Add ml_pipeline to path to import shared feature engineering
+# Add ml_pipeline to path to import shared modules
 _ml_pipeline_path = os.path.join(os.path.dirname(__file__), '..', 'ml_pipeline', 'trainer')
+_shared_path = os.path.join(os.path.dirname(__file__), '..', 'ml_pipeline', 'shared')
+
 if os.path.exists(_ml_pipeline_path):
     sys.path.insert(0, _ml_pipeline_path)
     try:
@@ -48,6 +50,19 @@ else:
     print(f"⚠️  Feature engineering module not found at {_ml_pipeline_path}")
     def engineer_features_from_raw(*args, **kwargs):
         raise HTTPException(status_code=500, detail="Feature engineering module not available")
+
+# Import shared Earth Engine features module
+if os.path.exists(_shared_path):
+    sys.path.insert(0, _shared_path)
+    try:
+        from earth_engine_features import compute_ndvi_features_sync
+        print("✅ Shared Earth Engine features module loaded")
+    except ImportError as e:
+        print(f"⚠️  Could not import earth_engine_features: {e}")
+        compute_ndvi_features_sync = None
+else:
+    print(f"⚠️  Shared module not found at {_shared_path}")
+    compute_ndvi_features_sync = None
 
 # Initialize FastAPI
 app = FastAPI(
@@ -335,6 +350,7 @@ def get_cdl_crop_type(polygon_coords: List[Tuple[float, float]], year: int) -> O
 def compute_ndvi_features(polygon_coords: List[Tuple[float, float]], year: int) -> List[float]:
     """
     Compute 17 NDVI features from Sentinel-2 imagery for a given polygon.
+    Uses shared Earth Engine feature extraction module.
     
     Features (in order):
     1. ndvi_mean, ndvi_std, ndvi_min, ndvi_max
@@ -359,98 +375,28 @@ def compute_ndvi_features(polygon_coords: List[Tuple[float, float]], year: int) 
         # Create Earth Engine polygon
         ee_polygon = ee.Geometry.Polygon([polygon_coords])
         
-        # Date range for the growing season
-        start_date = f"{year}-01-01"
-        end_date = f"{year}-12-31"
-        early_end = f"{year}-06-30"
-        late_start = f"{year}-07-01"
-        
-        # Load Sentinel-2 collection
-        s2_collection = (
-            ee.ImageCollection(SENTINEL2_COLLECTION)
-            .filterBounds(ee_polygon)
-            .filterDate(start_date, end_date)
-            .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 20))
-        )
-        
-        # Compute NDVI
-        def add_ndvi(image):
-            ndvi = image.normalizedDifference(["B8", "B4"]).rename("NDVI")
-            return image.addBands(ndvi)
-        
-        ndvi_collection = s2_collection.map(add_ndvi).select("NDVI")
-        
-        # Overall statistics
-        ndvi_composite = ndvi_collection.median()
-        
-        stats = ndvi_composite.reduceRegion(
-            reducer=ee.Reducer.mean()
-                .combine(ee.Reducer.stdDev(), "", True)
-                .combine(ee.Reducer.min(), "", True)
-                .combine(ee.Reducer.max(), "", True)
-                .combine(ee.Reducer.percentile([25, 50, 75]), "", True),
-            geometry=ee_polygon,
-            scale=10,
-            maxPixels=1e9
-        ).getInfo()
-        
-        # Early season vs late season
-        early_ndvi = (
-            ndvi_collection
-            .filterDate(start_date, early_end)
-            .median()
-            .reduceRegion(
-                reducer=ee.Reducer.mean(),
-                geometry=ee_polygon,
-                scale=10,
-                maxPixels=1e9
+        # Use shared Earth Engine feature extraction (SINGLE SOURCE OF TRUTH!)
+        if compute_ndvi_features_sync:
+            raw_features = compute_ndvi_features_sync(ee_polygon, year)
+            ndvi_mean = raw_features['ndvi_mean']
+            ndvi_std = raw_features['ndvi_std']
+            ndvi_min = raw_features['ndvi_min']
+            ndvi_max = raw_features['ndvi_max']
+            ndvi_p25 = raw_features['ndvi_p25']
+            ndvi_p50 = raw_features['ndvi_p50']
+            ndvi_p75 = raw_features['ndvi_p75']
+            ndvi_early = raw_features['ndvi_early']
+            ndvi_late = raw_features['ndvi_late']
+            elevation_m = raw_features['elevation_m']
+            longitude = raw_features['longitude']
+            latitude = raw_features['latitude']
+        else:
+            # Fallback if shared module not available (shouldn't happen in production)
+            print("⚠️  Shared module not available, using fallback NDVI computation")
+            raise HTTPException(
+                status_code=500,
+                detail="Shared Earth Engine features module not available"
             )
-            .getInfo()
-        )
-        
-        late_ndvi = (
-            ndvi_collection
-            .filterDate(late_start, end_date)
-            .median()
-            .reduceRegion(
-                reducer=ee.Reducer.mean(),
-                geometry=ee_polygon,
-                scale=10,
-                maxPixels=1e9
-            )
-            .getInfo()
-        )
-        
-        # Elevation from SRTM
-        elevation = (
-            ee.Image("USGS/SRTMGL1_003")
-            .select("elevation")
-            .reduceRegion(
-                reducer=ee.Reducer.mean(),
-                geometry=ee_polygon,
-                scale=30,
-                maxPixels=1e9
-            )
-            .getInfo()
-        )
-        
-        # Extract values with defaults
-        ndvi_mean = stats.get("NDVI_mean", 0.5)
-        ndvi_std = stats.get("NDVI_stdDev", 0.1)
-        ndvi_min = stats.get("NDVI_min", 0.0)
-        ndvi_max = stats.get("NDVI_max", 1.0)
-        ndvi_p25 = stats.get("NDVI_p25", 0.4)
-        ndvi_p50 = stats.get("NDVI_p50", 0.5)
-        ndvi_p75 = stats.get("NDVI_p75", 0.6)
-        
-        ndvi_early = early_ndvi.get("NDVI", ndvi_mean)
-        ndvi_late = late_ndvi.get("NDVI", ndvi_mean)
-        elevation_m = elevation.get("elevation", 0.0)
-        
-        # Calculate centroid for location features
-        centroid = ee_polygon.centroid().coordinates().getInfo()
-        longitude = centroid[0]
-        latitude = centroid[1]
         
         # Use shared feature engineering (ensures consistency with training)
         features = engineer_features_from_raw(

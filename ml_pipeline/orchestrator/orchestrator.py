@@ -112,38 +112,56 @@ def run_pipeline():
 
 def export_earth_engine_data():
     """
-    Export training data from Earth Engine to Cloud Storage.
+    Export training data from Earth Engine directly to BigQuery.
+    Fully automated - no manual steps required!
     
     Returns:
         dict with export results
     """
     try:
+        # Import Earth Engine collector (same directory)
+        import sys
+        import os
+        sys.path.insert(0, os.path.dirname(__file__))
+        from earth_engine_collector import (
+            collect_training_data, export_to_bigquery, wait_for_export
+        )
+        
         project_id = config['project']['id']
-        bucket_name = config['storage']['bucket']
-        samples_per_crop = config['data_collection']['samples_per_crop']
+        dataset_id = config['bigquery']['dataset']
+        table_id = config['bigquery']['tables']['training']
+        num_fields_per_crop = config.get('data_collection', {}).get('num_fields_per_crop', 30)
+        num_samples_per_field = config.get('data_collection', {}).get('num_samples_per_field', 3)
         crops = config['data_collection']['crops']
         
-        logger.info(f"   Exporting {samples_per_crop} samples per crop...")
+        total_samples = num_fields_per_crop * num_samples_per_field * len(crops)
+        
+        logger.info(f"   Collecting {total_samples} total samples...")
         logger.info(f"   Crops: {[c['name'] for c in crops]}")
+        logger.info(f"   Samples per crop: {num_fields_per_crop * num_samples_per_field}")
         
-        # Initialize Earth Engine
-        ee.Initialize(project=project_id)
+        # Collect training data from Earth Engine
+        logger.info("   🌍 Collecting samples from Earth Engine...")
+        training_data = collect_training_data(config)
         
-        # Export data to GCS as CSV (trainer will load this)
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        export_path = f'gs://{bucket_name}/training_exports/export_{timestamp}.csv'
+        # Export directly to BigQuery
+        logger.info("   📤 Exporting to BigQuery...")
+        task_id = export_to_bigquery(training_data, project_id, dataset_id, table_id)
         
-        # TODO: Implement actual EE export
-        # For now, just trigger BigQuery collection
+        # Wait for export to complete (with timeout)
+        logger.info("   ⏳ Waiting for export to complete...")
+        success = wait_for_export(task_id, timeout_minutes=30)
         
-        total_samples = samples_per_crop * len(crops)
-        
-        logger.info(f"   ✅ Would export {total_samples} samples to {export_path}")
+        if not success:
+            logger.warning("   ⚠️  Export may still be running - check Earth Engine Tasks")
+            logger.warning("   ⚠️  Pipeline will continue, but data may not be available yet")
         
         return {
             'status': 'success',
             'samples_collected': total_samples,
-            'export_path': export_path
+            'task_id': task_id,
+            'export_completed': success,
+            'table': f'{project_id}.{dataset_id}.{table_id}'
         }
     
     except Exception as e:

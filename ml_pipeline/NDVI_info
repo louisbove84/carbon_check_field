@@ -22,8 +22,8 @@
 // ---------------------------------------------------------------
 // 1. CONFIGURATION - EDIT THESE!
 // ---------------------------------------------------------------
-var NUM_FIELDS_PER_CROP = 10;     // Number of fields per crop (increased for 100+ samples)
-var NUM_SAMPLES_PER_FIELD = 3;    // Number of samples per crop (10*3*4 crops = 120 total samples)
+var NUM_FIELDS_PER_CROP = 30;     // Number of fields per crop (increased for more diverse data)
+var NUM_SAMPLES_PER_FIELD = 3;    // Number of samples per field (30*3*4 crops = 360 total samples)
 var FIELD_RADIUS = 200;           // Buffer radius in meters (not used with new sampling)
 var CDL_YEAR = 2024;              // Which CDL year to use
 
