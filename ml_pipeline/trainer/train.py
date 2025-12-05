@@ -35,6 +35,7 @@ from torch.utils.tensorboard import SummaryWriter
 import io
 from PIL import Image
 from feature_engineering import engineer_features_dataframe, compute_elevation_quantiles
+from model_evaluation import run_comprehensive_evaluation
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -183,21 +184,36 @@ def train_model(df, feature_cols, config):
         'n_test_samples': len(X_test)
     }
     
-    return pipeline, metrics, y_test, y_pred
+    return pipeline, metrics, X_test, y_test, y_pred
 
 
 def generate_confusion_matrix(y_true, y_pred, labels, output_path):
-    """Generate and save confusion matrix visualization."""
+    """Generate and save confusion matrix visualization with percentages."""
     cm = confusion_matrix(y_true, y_pred, labels=labels)
     
-    plt.figure(figsize=(10, 8))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                xticklabels=labels, yticklabels=labels)
-    plt.title('Confusion Matrix', fontsize=16, pad=20)
-    plt.ylabel('True Label', fontsize=12)
-    plt.xlabel('Predicted Label', fontsize=12)
+    # Calculate percentages for each row (true class)
+    cm_percent = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis] * 100
+    
+    # Create annotations with both counts and percentages
+    annot = np.empty_like(cm, dtype=object)
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            annot[i, j] = f'{cm[i, j]}\n({cm_percent[i, j]:.1f}%)'
+    
+    fig, ax = plt.subplots(figsize=(12, 10))
+    sns.heatmap(cm, annot=annot, fmt='', cmap='Blues', 
+                xticklabels=labels, yticklabels=labels, ax=ax,
+                cbar_kws={'label': 'Count'})
+    ax.set_title('Confusion Matrix (Count and Percentage)', fontsize=16, pad=20)
+    ax.set_ylabel('True Label', fontsize=14, fontweight='bold')
+    ax.set_xlabel('Predicted Label', fontsize=14, fontweight='bold')
+    
+    # Rotate labels for better readability
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+    plt.setp(ax.get_yticklabels(), rotation=0)
+    
     plt.tight_layout()
-    plt.savefig(output_path, dpi=100, bbox_inches='tight')
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
     plt.close()
     
     logger.info(f"✅ Confusion matrix saved to {output_path}")
@@ -292,6 +308,20 @@ def log_to_tensorboard(config, metrics, y_test, y_pred, output_dir):
         # Also save confusion matrix to output directory for GCS upload
         cm_path = os.path.join(output_dir, 'confusion_matrix.png')
         generate_confusion_matrix(y_test, y_pred, crops, cm_path)
+        
+        # Add references to comprehensive evaluation artifacts (if they exist)
+        eval_dir = os.path.join(output_dir, 'evaluation')
+        if os.path.exists(eval_dir):
+            eval_summary = f"""
+            Comprehensive Evaluation Artifacts:
+            ====================================
+            - Enhanced Confusion Matrix: evaluation/confusion_matrix_enhanced.png
+            - Per-Crop Metrics: evaluation/per_crop_metrics.png
+            - Feature Importance: evaluation/feature_importance.png
+            - Misclassification Analysis: evaluation/misclassification_analysis.png
+            - Advanced Metrics: evaluation/advanced_metrics.json
+            """
+            writer.add_text('evaluation_artifacts', eval_summary, 0)
         
         # Log text summary
         report_text = f"""
@@ -446,11 +476,22 @@ if __name__ == '__main__':
         df_enhanced, feature_cols = engineer_features(df, config)
         
         # Train model
-        pipeline, metrics, y_test, y_pred = train_model(df_enhanced, feature_cols, config)
+        pipeline, metrics, X_test, y_test, y_pred = train_model(df_enhanced, feature_cols, config)
         
         # Create output directory for artifacts
         output_dir = os.environ.get('AIP_MODEL_DIR', '/tmp/model')
         os.makedirs(output_dir, exist_ok=True)
+        
+        # Run comprehensive evaluation (includes enhanced confusion matrix, feature importance, etc.)
+        logger.info("\n🔍 Running comprehensive model evaluation...")
+        eval_dir = os.path.join(output_dir, 'evaluation')
+        eval_results = run_comprehensive_evaluation(
+            model=pipeline,
+            X_test=X_test,
+            y_test=y_test,
+            feature_names=feature_cols,
+            output_dir=eval_dir
+        )
         
         # Log to TensorBoard
         log_to_tensorboard(config, metrics, y_test, y_pred, output_dir)
