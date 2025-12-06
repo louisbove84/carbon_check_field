@@ -416,37 +416,48 @@ if __name__ == '__main__':
             logger.info(f"   Destination: {tensorboard_gcs_path}")
             
             try:
-                # Use gsutil to copy all files from local to GCS
-                import subprocess
-                result = subprocess.run(
-                    ['gsutil', '-m', 'rsync', '-r', '-v', local_tensorboard_dir, tensorboard_gcs_path],
-                    capture_output=True,
-                    text=True,
-                    timeout=300
-                )
-                
-                # Log detailed output
-                logger.info(f"\n📋 gsutil output:")
-                if result.stdout:
-                    logger.info(f"STDOUT:\n{result.stdout}")
-                if result.stderr:
-                    logger.info(f"STDERR:\n{result.stderr}")
-                
-                if result.returncode == 0:
-                    logger.info(f"✅ TensorBoard logs uploaded successfully")
-                    
-                    # Verify upload by listing GCS contents
-                    logger.info(f"\n📂 Verifying GCS upload...")
-                    list_result = subprocess.run(
-                        ['gsutil', 'ls', '-lh', f'{tensorboard_gcs_path}/'],
-                        capture_output=True,
-                        text=True,
-                        timeout=60
-                    )
-                    logger.info(f"GCS contents:\n{list_result.stdout}")
+                # Parse GCS path
+                if not tensorboard_gcs_path.startswith('gs://'):
+                    logger.error(f"❌ Invalid GCS path: {tensorboard_gcs_path}")
                 else:
-                    logger.error(f"❌ Upload failed with return code: {result.returncode}")
-                    logger.error(f"stderr: {result.stderr}")
+                    gcs_path_parts = tensorboard_gcs_path.replace('gs://', '').split('/', 1)
+                    bucket_name = gcs_path_parts[0]
+                    gcs_prefix = gcs_path_parts[1] if len(gcs_path_parts) > 1 else ''
+                    
+                    # Use storage client to upload files
+                    storage_client = storage.Client()
+                    bucket = storage_client.bucket(bucket_name)
+                    
+                    # Find all files to upload
+                    uploaded_files = []
+                    for root, dirs, files in os.walk(local_tensorboard_dir):
+                        for file in files:
+                            local_file_path = os.path.join(root, file)
+                            relative_path = os.path.relpath(local_file_path, local_tensorboard_dir)
+                            
+                            # Construct GCS blob path
+                            if gcs_prefix:
+                                gcs_blob_path = f"{gcs_prefix}/{relative_path}".replace('\\', '/')
+                            else:
+                                gcs_blob_path = relative_path.replace('\\', '/')
+                            
+                            blob = bucket.blob(gcs_blob_path)
+                            blob.upload_from_filename(local_file_path)
+                            uploaded_files.append(gcs_blob_path)
+                            
+                            if len(uploaded_files) <= 5:  # Log first 5 files
+                                logger.info(f"   ✅ Uploaded: {gcs_blob_path}")
+                    
+                    logger.info(f"✅ Uploaded {len(uploaded_files)} TensorBoard log files to {tensorboard_gcs_path}")
+                    
+                    # List what was uploaded
+                    if uploaded_files:
+                        logger.info(f"\n📂 Files in GCS:")
+                        for f in uploaded_files[:10]:  # Show first 10
+                            logger.info(f"   - {f}")
+                        if len(uploaded_files) > 10:
+                            logger.info(f"   ... and {len(uploaded_files) - 10} more files")
+                    
             except Exception as e:
                 logger.error(f"❌ Failed to upload TensorBoard logs: {e}")
                 import traceback
