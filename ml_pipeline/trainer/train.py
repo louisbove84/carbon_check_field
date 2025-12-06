@@ -436,9 +436,11 @@ if __name__ == '__main__':
                             local_file_path = os.path.join(root, file)
                             relative_path = os.path.relpath(local_file_path, local_tensorboard_dir)
                             
-                            # Construct GCS blob path
+                            # Construct GCS blob path (avoid double slashes)
                             if gcs_prefix:
-                                gcs_blob_path = f"{gcs_prefix}/{relative_path}".replace('\\', '/')
+                                # Remove trailing slash from prefix to avoid double slashes
+                                clean_prefix = gcs_prefix.rstrip('/')
+                                gcs_blob_path = f"{clean_prefix}/{relative_path}".replace('\\', '/')
                             else:
                                 gcs_blob_path = relative_path.replace('\\', '/')
                             
