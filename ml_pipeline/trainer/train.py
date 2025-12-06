@@ -279,9 +279,11 @@ def upload_tensorboard_logs(local_log_dir, config):
         for local_file_path in files_to_upload:
             # Get relative path from local_log_dir
             relative_path = os.path.relpath(local_file_path, local_log_dir)
-            # Construct GCS blob path
+            # Construct GCS blob path (avoid double slashes)
             if gcs_prefix:
-                gcs_blob_path = f"{gcs_prefix}/{relative_path}".replace('\\', '/')
+                # Remove trailing slash from prefix to avoid double slashes
+                clean_prefix = gcs_prefix.rstrip('/')
+                gcs_blob_path = f"{clean_prefix}/{relative_path}".replace('\\', '/')
             else:
                 gcs_blob_path = relative_path.replace('\\', '/')
             
