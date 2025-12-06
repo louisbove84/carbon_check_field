@@ -369,20 +369,18 @@ if __name__ == '__main__':
         output_dir = os.environ.get('AIP_MODEL_DIR', '/tmp/model')
         os.makedirs(output_dir, exist_ok=True)
         
-        # Create TensorBoard writer - use Vertex AI's TensorBoard path if available
-        # This ensures logs are written directly where Vertex AI TensorBoard expects them
+        # Create TensorBoard writer
+        # Note: SummaryWriter cannot write directly to GCS, so we write locally first
+        local_tensorboard_dir = os.path.join(output_dir, 'tensorboard_logs')
+        os.makedirs(local_tensorboard_dir, exist_ok=True)
+        logger.info(f"📊 Writing TensorBoard logs to local directory: {local_tensorboard_dir}")
+        
+        # Check if Vertex AI TensorBoard is configured
         tensorboard_gcs_path = os.environ.get('AIP_TENSORBOARD_LOG_DIR')
         if tensorboard_gcs_path:
-            # Vertex AI provides a GCS path - write directly there
-            logger.info(f"📊 Writing TensorBoard logs to Vertex AI path: {tensorboard_gcs_path}")
-            tensorboard_log_dir = tensorboard_gcs_path
-        else:
-            # Fallback to local directory for non-Vertex AI training
-            tensorboard_log_dir = os.path.join(output_dir, 'tensorboard_logs')
-            os.makedirs(tensorboard_log_dir, exist_ok=True)
-            logger.info(f"📊 Writing TensorBoard logs locally: {tensorboard_log_dir}")
+            logger.info(f"📤 Will upload to Vertex AI TensorBoard: {tensorboard_gcs_path}")
         
-        writer = SummaryWriter(log_dir=tensorboard_log_dir)
+        writer = SummaryWriter(log_dir=local_tensorboard_dir)
         
         # Run comprehensive evaluation (logs everything to TensorBoard)
         # Use multiple runs to show progression in scalars
@@ -402,8 +400,26 @@ if __name__ == '__main__':
         
         writer.close()
         
-        # No need to upload - logs are already written to Vertex AI's GCS path
-        logger.info(f"✅ TensorBoard logs written to: {tensorboard_log_dir}")
+        # Upload TensorBoard logs to GCS if Vertex AI TensorBoard is configured
+        if tensorboard_gcs_path:
+            logger.info(f"📤 Uploading TensorBoard logs to GCS...")
+            try:
+                # Use gsutil to copy all files from local to GCS
+                import subprocess
+                result = subprocess.run(
+                    ['gsutil', '-m', 'rsync', '-r', local_tensorboard_dir, tensorboard_gcs_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+                if result.returncode == 0:
+                    logger.info(f"✅ TensorBoard logs uploaded to: {tensorboard_gcs_path}")
+                else:
+                    logger.warning(f"⚠️  Upload failed: {result.stderr}")
+            except Exception as e:
+                logger.warning(f"⚠️  Failed to upload TensorBoard logs: {e}")
+        else:
+            logger.info(f"📊 TensorBoard logs saved locally: {local_tensorboard_dir}")
         
         # Save model and metrics
         save_model(pipeline, feature_cols, metrics, config)
