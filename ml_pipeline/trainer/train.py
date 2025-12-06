@@ -399,27 +399,61 @@ if __name__ == '__main__':
         log_training_metrics_to_tensorboard(writer, config, metrics, y_test, y_pred)
         
         writer.close()
+        logger.info("✅ SummaryWriter closed")
+        
+        # List files created locally
+        logger.info(f"\n📂 Local TensorBoard files created:")
+        for root, dirs, files in os.walk(local_tensorboard_dir):
+            for file in files:
+                filepath = os.path.join(root, file)
+                size = os.path.getsize(filepath)
+                logger.info(f"   {filepath} ({size} bytes)")
         
         # Upload TensorBoard logs to GCS if Vertex AI TensorBoard is configured
         if tensorboard_gcs_path:
-            logger.info(f"📤 Uploading TensorBoard logs to GCS...")
+            logger.info(f"\n📤 Uploading TensorBoard logs to GCS...")
+            logger.info(f"   Source: {local_tensorboard_dir}")
+            logger.info(f"   Destination: {tensorboard_gcs_path}")
+            
             try:
                 # Use gsutil to copy all files from local to GCS
                 import subprocess
                 result = subprocess.run(
-                    ['gsutil', '-m', 'rsync', '-r', local_tensorboard_dir, tensorboard_gcs_path],
+                    ['gsutil', '-m', 'rsync', '-r', '-v', local_tensorboard_dir, tensorboard_gcs_path],
                     capture_output=True,
                     text=True,
                     timeout=300
                 )
+                
+                # Log detailed output
+                logger.info(f"\n📋 gsutil output:")
+                if result.stdout:
+                    logger.info(f"STDOUT:\n{result.stdout}")
+                if result.stderr:
+                    logger.info(f"STDERR:\n{result.stderr}")
+                
                 if result.returncode == 0:
-                    logger.info(f"✅ TensorBoard logs uploaded to: {tensorboard_gcs_path}")
+                    logger.info(f"✅ TensorBoard logs uploaded successfully")
+                    
+                    # Verify upload by listing GCS contents
+                    logger.info(f"\n📂 Verifying GCS upload...")
+                    list_result = subprocess.run(
+                        ['gsutil', 'ls', '-lh', f'{tensorboard_gcs_path}/'],
+                        capture_output=True,
+                        text=True,
+                        timeout=60
+                    )
+                    logger.info(f"GCS contents:\n{list_result.stdout}")
                 else:
-                    logger.warning(f"⚠️  Upload failed: {result.stderr}")
+                    logger.error(f"❌ Upload failed with return code: {result.returncode}")
+                    logger.error(f"stderr: {result.stderr}")
             except Exception as e:
-                logger.warning(f"⚠️  Failed to upload TensorBoard logs: {e}")
+                logger.error(f"❌ Failed to upload TensorBoard logs: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
         else:
             logger.info(f"📊 TensorBoard logs saved locally: {local_tensorboard_dir}")
+            logger.warning("⚠️  No AIP_TENSORBOARD_LOG_DIR set - logs will not appear in Vertex AI TensorBoard")
         
         # Save model and metrics
         save_model(pipeline, feature_cols, metrics, config)
