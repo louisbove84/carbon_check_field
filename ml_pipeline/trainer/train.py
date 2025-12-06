@@ -370,10 +370,11 @@ if __name__ == '__main__':
         os.makedirs(output_dir, exist_ok=True)
         
         # Create TensorBoard writer
-        # Note: SummaryWriter cannot write directly to GCS, so we write locally first
-        local_tensorboard_dir = os.path.join(output_dir, 'tensorboard_logs')
+        # IMPORTANT: SummaryWriter MUST write to a LOCAL path (not GCS)
+        # Even if AIP_MODEL_DIR is a GCS path, we need a local directory for TensorBoard
+        local_tensorboard_dir = '/tmp/tensorboard_logs'
         os.makedirs(local_tensorboard_dir, exist_ok=True)
-        logger.info(f"📊 Writing TensorBoard logs to local directory: {local_tensorboard_dir}")
+        logger.info(f"📊 Writing TensorBoard logs to LOCAL directory: {local_tensorboard_dir}")
         
         # Check if Vertex AI TensorBoard is configured
         tensorboard_gcs_path = os.environ.get('AIP_TENSORBOARD_LOG_DIR')
