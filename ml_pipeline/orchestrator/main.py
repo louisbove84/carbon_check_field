@@ -19,8 +19,16 @@ app = Flask(__name__)
 
 @app.route('/', methods=['POST'])
 def run():
-    """Trigger the ML pipeline."""
+    """Trigger the complete ML pipeline (data collection + training + deployment)."""
     result = orchestrator.run_pipeline()
+    status_code = 200 if result['status'] == 'success' else 500
+    return jsonify(result), status_code
+
+
+@app.route('/train', methods=['POST'])
+def train():
+    """Trigger only training (skip data collection and deployment)."""
+    result = orchestrator.run_training_only()
     status_code = 200 if result['status'] == 'success' else 500
     return jsonify(result), status_code
 

@@ -38,6 +38,54 @@ def load_config():
 config = load_config()
 
 
+def run_training_only():
+    """
+    Run only the training step (skip data collection and deployment).
+    
+    Returns:
+        dict with training results
+    """
+    start_time = datetime.now()
+    
+    logger.info("=" * 70)
+    logger.info("🤖 TRAINING ONLY (No Data Collection)")
+    logger.info("=" * 70)
+    
+    try:
+        # Trigger Vertex AI Training Job
+        logger.info("STEP 1: Trigger Vertex AI Custom Training Job")
+        logger.info("-" * 70)
+        training_result = trigger_training_job()
+        if training_result['status'] != 'success':
+            raise Exception(f"Training job failed: {training_result.get('error')}")
+        logger.info(f"✅ Training complete - Accuracy: {training_result['accuracy']:.2%}")
+        logger.info("")
+        
+        # Summary
+        duration = (datetime.now() - start_time).total_seconds() / 60
+        
+        logger.info("=" * 70)
+        logger.info("✅ TRAINING COMPLETE")
+        logger.info("=" * 70)
+        logger.info(f"Duration: {duration:.1f} minutes")
+        logger.info(f"Accuracy: {training_result['accuracy']:.2%}")
+        
+        return {
+            'status': 'success',
+            'duration_minutes': round(duration, 2),
+            'training': training_result
+        }
+    
+    except Exception as e:
+        duration = (datetime.now() - start_time).total_seconds() / 60
+        logger.error(f"❌ Training failed: {e}", exc_info=True)
+        return {
+            'status': 'error',
+            'error': str(e),
+            'duration_minutes': round(duration, 2)
+        }
+
+
 def run_pipeline():
     """
     Run the complete ML pipeline.
