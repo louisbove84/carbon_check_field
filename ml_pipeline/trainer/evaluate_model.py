@@ -260,6 +260,13 @@ Examples:
         help='Path to config.yaml (local or GCS path like "config.yaml")'
     )
     
+    parser.add_argument(
+        '--num-runs',
+        type=int,
+        default=5,
+        help='Number of evaluation runs to log (for multiple scalar data points, default: 5)'
+    )
+    
     args = parser.parse_args()
     
     logger.info("=" * 70)
@@ -307,13 +314,55 @@ Examples:
         
         df_enhanced, feature_cols_engineered = engineer_features_dataframe(df, elevation_quantiles)
         
-        # Always use engineered feature columns (they match what the model was trained with)
-        # The model's feature_cols.json might have old names, but the model itself expects
-        # the engineered features in the order returned by engineer_features_dataframe
-        feature_cols = feature_cols_engineered
-        logger.info(f"   Using {len(feature_cols)} engineered features: {feature_cols[:5]}...")
+        # Use feature names that match what the model was trained with
+        # Check what the model expects
+        model_expected_features = None
+        if hasattr(model, 'named_steps'):
+            scaler = model.named_steps.get('scaler')
+            if scaler and hasattr(scaler, 'feature_names_in_'):
+                model_expected_features = list(scaler.feature_names_in_)
+                logger.info(f"   Model expects {len(model_expected_features)} features from training")
         
-        # Verify model expects the right number of features
+        # Use model's expected features if available, otherwise use feature_cols from JSON, otherwise use engineered
+        if model_expected_features:
+            # Map old feature names to new ones if needed
+            feature_mapping = {
+                'elevation_m': 'elevation_m',  # Keep raw elevation if model expects it
+                'longitude': 'longitude',
+                'latitude': 'latitude'
+            }
+            
+            # Check if model expects old features (elevation_m, lat/lon) or new ones (elevation_binned, sin/cos)
+            if 'elevation_m' in model_expected_features:
+                # Model was trained with old features - need to use those
+                # But we have engineered features, so we need to map back
+                logger.info("   Model was trained with old features (elevation_m, lat/lon)")
+                logger.info("   Using raw features to match model expectations")
+                # Use raw features from dataframe
+                feature_cols = [f for f in model_expected_features if f in df_enhanced.columns]
+                # Add raw lat/lon/elevation if they exist in the original df
+                if 'elevation_m' in df.columns and 'elevation_m' in model_expected_features:
+                    df_enhanced['elevation_m'] = df['elevation_m']
+                if 'longitude' in df.columns and 'longitude' in model_expected_features:
+                    df_enhanced['longitude'] = df['longitude']
+                if 'latitude' in df.columns and 'latitude' in model_expected_features:
+                    df_enhanced['latitude'] = df['latitude']
+            else:
+                # Model expects new engineered features
+                feature_cols = [f for f in model_expected_features if f in df_enhanced.columns]
+        elif feature_cols:
+            # Use feature names from saved model
+            feature_cols = [f for f in feature_cols if f in df_enhanced.columns]
+            logger.info(f"   Using {len(feature_cols)} features from saved model")
+        else:
+            # Fallback to engineered features
+            feature_cols = feature_cols_engineered
+            logger.info(f"   Using {len(feature_cols)} engineered features")
+        
+        logger.info(f"   Final feature count: {len(feature_cols)}")
+        logger.info(f"   Features: {feature_cols[:5]}...")
+        
+        # Verify feature count matches
         if hasattr(model, 'named_steps'):
             rf_model = model.named_steps['classifier']
         else:
@@ -322,7 +371,9 @@ Examples:
         if hasattr(rf_model, 'n_features_in_'):
             expected_features = rf_model.n_features_in_
             if len(feature_cols) != expected_features:
-                logger.warning(f"⚠️  Feature count mismatch: model expects {expected_features}, we have {len(feature_cols)}")
+                logger.error(f"❌ Feature count mismatch: model expects {expected_features}, we have {len(feature_cols)}")
+                logger.error(f"   Missing: {set(model_expected_features or []) - set(feature_cols)}")
+                logger.error(f"   Extra: {set(feature_cols) - set(model_expected_features or [])}")
             else:
                 logger.info(f"   ✅ Feature count matches model: {expected_features}")
         
@@ -365,7 +416,8 @@ Examples:
             y_test=y_test,
             feature_names=feature_cols,
             writer=writer,
-            step=0
+            step=0,
+            num_runs=args.num_runs
         )
         
         writer.close()
