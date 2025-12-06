@@ -1,0 +1,20 @@
+[
+  {
+    "True":"Soybeans",
+    "Predicted":"Corn",
+    "Count":2,
+    "Percentage":3.2258064516
+  },
+  {
+    "True":"Corn",
+    "Predicted":"Soybeans",
+    "Count":1,
+    "Percentage":1.6129032258
+  },
+  {
+    "True":"Winter_Wheat",
+    "Predicted":"Winter Wheat",
+    "Count":1,
+    "Percentage":16.6666666667
+  }
+]

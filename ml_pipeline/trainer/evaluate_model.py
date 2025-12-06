@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from model_evaluation import run_comprehensive_evaluation
 from feature_engineering import engineer_features_dataframe, compute_elevation_quantiles
+from torch.utils.tensorboard import SummaryWriter
 
 # Setup logging
 logging.basicConfig(
@@ -32,6 +33,7 @@ logger = logging.getLogger(__name__)
 # Set matplotlib to non-interactive backend
 import matplotlib
 matplotlib.use('Agg')
+
 
 
 def load_config(config_path=None, bucket_name=None):
@@ -188,6 +190,8 @@ def load_config_from_gcs(config_path, bucket_name):
     return config
 
 
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Evaluate an existing trained model without retraining',
@@ -289,7 +293,19 @@ Examples:
         
         # Engineer features (same as training)
         logger.info("🔧 Engineering features...")
-        df_enhanced, feature_cols_engineered = engineer_features_dataframe(df, config)
+        
+        # Get elevation quantiles from config or compute from data
+        elevation_quantiles = None
+        if 'features' in config and 'elevation_quantiles' in config['features']:
+            elevation_quantiles = config['features']['elevation_quantiles']
+            logger.info(f"   Using elevation quantiles from config: {elevation_quantiles}")
+        
+        if not elevation_quantiles or not elevation_quantiles.get('q25'):
+            logger.info("   Computing elevation quantiles from data...")
+            elevation_quantiles = compute_elevation_quantiles(df)
+            logger.info(f"   Elevation quantiles: {elevation_quantiles}")
+        
+        df_enhanced, feature_cols_engineered = engineer_features_dataframe(df, elevation_quantiles)
         
         # Use feature columns from model if available, otherwise use engineered
         if feature_cols:
@@ -327,7 +343,12 @@ Examples:
         # Create output directory
         os.makedirs(args.output_dir, exist_ok=True)
         
-        # Run comprehensive evaluation
+        # Create TensorBoard writer
+        tensorboard_log_dir = os.path.join(args.output_dir, 'tensorboard_logs')
+        os.makedirs(tensorboard_log_dir, exist_ok=True)
+        writer = SummaryWriter(log_dir=tensorboard_log_dir)
+        
+        # Run comprehensive evaluation (logs everything to TensorBoard)
         logger.info("🔍 Running comprehensive evaluation...")
         logger.info("")
         
@@ -336,23 +357,18 @@ Examples:
             X_test=X_test,
             y_test=y_test,
             feature_names=feature_cols,
-            output_dir=args.output_dir
+            writer=writer,
+            step=0
         )
+        
+        writer.close()
         
         logger.info("")
         logger.info("=" * 70)
         logger.info("✅ EVALUATION COMPLETE")
         logger.info("=" * 70)
         logger.info("")
-        logger.info(f"📁 Results saved to: {args.output_dir}")
-        logger.info("")
-        logger.info("Generated files:")
-        for key, value in eval_results.items():
-            if 'path' in key.lower() and value:
-                if os.path.exists(value):
-                    file_size = os.path.getsize(value) / 1024  # KB
-                    logger.info(f"   ✅ {os.path.basename(value)} ({file_size:.1f} KB)")
-        
+        logger.info(f"📊 TensorBoard logs saved to: {tensorboard_log_dir}")
         logger.info("")
         logger.info("📊 Summary Metrics:")
         if 'advanced_metrics' in eval_results:
@@ -364,8 +380,9 @@ Examples:
             logger.info(f"   Weighted F1: {metrics['weighted_avg']['f1_score']:.2%}")
         
         logger.info("")
-        logger.info(f"💡 View confusion matrix:")
-        logger.info(f"   open {args.output_dir}/confusion_matrix_enhanced.png")
+        logger.info(f"💡 View results in TensorBoard:")
+        logger.info(f"   tensorboard --logdir {tensorboard_log_dir}")
+        logger.info(f"   Then open: http://localhost:6006")
         
         return 0
         

@@ -482,19 +482,26 @@ if __name__ == '__main__':
         output_dir = os.environ.get('AIP_MODEL_DIR', '/tmp/model')
         os.makedirs(output_dir, exist_ok=True)
         
-        # Run comprehensive evaluation (includes enhanced confusion matrix, feature importance, etc.)
+        # Create TensorBoard writer for comprehensive evaluation
+        tensorboard_log_dir = os.path.join(output_dir, 'tensorboard_logs')
+        os.makedirs(tensorboard_log_dir, exist_ok=True)
+        writer = SummaryWriter(log_dir=tensorboard_log_dir)
+        
+        # Run comprehensive evaluation (logs everything to TensorBoard)
         logger.info("\n🔍 Running comprehensive model evaluation...")
-        eval_dir = os.path.join(output_dir, 'evaluation')
         eval_results = run_comprehensive_evaluation(
             model=pipeline,
             X_test=X_test,
             y_test=y_test,
             feature_names=feature_cols,
-            output_dir=eval_dir
+            writer=writer,
+            step=0
         )
         
-        # Log to TensorBoard
+        # Also log basic training metrics to TensorBoard (for compatibility)
         log_to_tensorboard(config, metrics, y_test, y_pred, output_dir)
+        
+        writer.close()
         
         # Save model and metrics
         save_model(pipeline, feature_cols, metrics, config)
