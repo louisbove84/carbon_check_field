@@ -307,17 +307,24 @@ Examples:
         
         df_enhanced, feature_cols_engineered = engineer_features_dataframe(df, elevation_quantiles)
         
-        # Use feature columns from model if available, otherwise use engineered
-        if feature_cols:
-            # Verify feature columns match
-            missing = set(feature_cols) - set(df_enhanced.columns)
-            if missing:
-                logger.warning(f"⚠️  Model expects features not in data: {missing}")
-            feature_cols = [f for f in feature_cols if f in df_enhanced.columns]
-            logger.info(f"   Using {len(feature_cols)} features from model")
+        # Always use engineered feature columns (they match what the model was trained with)
+        # The model's feature_cols.json might have old names, but the model itself expects
+        # the engineered features in the order returned by engineer_features_dataframe
+        feature_cols = feature_cols_engineered
+        logger.info(f"   Using {len(feature_cols)} engineered features: {feature_cols[:5]}...")
+        
+        # Verify model expects the right number of features
+        if hasattr(model, 'named_steps'):
+            rf_model = model.named_steps['classifier']
         else:
-            feature_cols = feature_cols_engineered
-            logger.info(f"   Using {len(feature_cols)} engineered features")
+            rf_model = model
+        
+        if hasattr(rf_model, 'n_features_in_'):
+            expected_features = rf_model.n_features_in_
+            if len(feature_cols) != expected_features:
+                logger.warning(f"⚠️  Feature count mismatch: model expects {expected_features}, we have {len(feature_cols)}")
+            else:
+                logger.info(f"   ✅ Feature count matches model: {expected_features}")
         
         logger.info("")
         

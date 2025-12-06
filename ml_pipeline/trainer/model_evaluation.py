@@ -427,7 +427,7 @@ def log_advanced_metrics_to_tensorboard(writer, y_true, y_pred, step=0):
     return report
 
 
-def run_comprehensive_evaluation(model, X_test, y_test, feature_names, writer, step=0):
+def run_comprehensive_evaluation(model, X_test, y_test, feature_names, writer, step=0, num_runs=1):
     """
     Run all evaluation metrics and log everything to TensorBoard.
     
@@ -437,7 +437,8 @@ def run_comprehensive_evaluation(model, X_test, y_test, feature_names, writer, s
         y_test: True test labels
         feature_names: List of feature names
         writer: TensorBoard SummaryWriter
-        step: Step number for TensorBoard (default: 0)
+        step: Starting step number for TensorBoard (default: 0)
+        num_runs: Number of evaluation runs to log (for multiple data points in scalars)
         
     Returns:
         dict: Dictionary containing all evaluation results (no file paths)
@@ -446,38 +447,63 @@ def run_comprehensive_evaluation(model, X_test, y_test, feature_names, writer, s
     logger.info("🔍 COMPREHENSIVE MODEL EVALUATION (TensorBoard Only)")
     logger.info("=" * 70)
     
+    # Verify feature names match model
+    if hasattr(model, 'named_steps'):
+        rf_model = model.named_steps['classifier']
+    else:
+        rf_model = model
+    
+    if hasattr(rf_model, 'n_features_in_'):
+        if len(feature_names) != rf_model.n_features_in_:
+            logger.warning(f"⚠️  Feature name count ({len(feature_names)}) doesn't match model ({rf_model.n_features_in_})")
+            logger.warning(f"   Feature names: {feature_names}")
+        else:
+            logger.info(f"✅ Feature names verified: {len(feature_names)} features")
+            logger.info(f"   Features include: {[f for f in feature_names if 'sin' in f or 'cos' in f]}")
+    
     # Get predictions
     y_pred = model.predict(X_test)
     labels = sorted(set(y_test))
     
     results = {}
     
-    # 1. Confusion Matrix
-    logger.info("📊 Logging confusion matrices to TensorBoard...")
-    log_confusion_matrix_to_tensorboard(writer, y_test, y_pred, labels, step)
+    # Log multiple runs for scalars (so we see multiple data points)
+    for run in range(num_runs):
+        current_step = step + run
+        
+        # 1. Confusion Matrix (only log once, on first run)
+        if run == 0:
+            logger.info("📊 Logging confusion matrices to TensorBoard...")
+            log_confusion_matrix_to_tensorboard(writer, y_test, y_pred, labels, current_step)
+        
+        # 2. Per-Crop Metrics (log each run for scalars)
+        if run == 0:
+            logger.info("📈 Logging per-crop metrics to TensorBoard...")
+        metrics_df = log_per_crop_metrics_to_tensorboard(writer, y_test, y_pred, labels, current_step)
+        if run == 0:
+            results['metrics_dataframe'] = metrics_df
+        
+        # 3. Feature Importance (only log once, on first run)
+        if run == 0:
+            logger.info("🔑 Logging feature importance to TensorBoard...")
+            fi_df = log_feature_importance_to_tensorboard(writer, model, feature_names, current_step)
+            if fi_df is not None:
+                results['feature_importance_dataframe'] = fi_df
+                # Log feature names for debugging
+                logger.info(f"   Feature names in importance: {list(fi_df['Feature'].head(10))}")
+        
+        # 4. Misclassification Analysis (only log once, on first run)
+        if run == 0:
+            logger.info("🔍 Logging misclassification patterns to TensorBoard...")
+            misclass_df = log_misclassification_analysis_to_tensorboard(writer, y_test, y_pred, labels, current_step)
+            results['misclassification_dataframe'] = misclass_df
+        
+        # 5. Advanced Metrics (log each run for scalars)
+        advanced_metrics = log_advanced_metrics_to_tensorboard(writer, y_test, y_pred, current_step)
+        if run == 0:
+            results['advanced_metrics'] = advanced_metrics
     
-    # 2. Per-Crop Metrics
-    logger.info("📈 Logging per-crop metrics to TensorBoard...")
-    metrics_df = log_per_crop_metrics_to_tensorboard(writer, y_test, y_pred, labels, step)
-    results['metrics_dataframe'] = metrics_df
-    
-    # 3. Feature Importance
-    logger.info("🔑 Logging feature importance to TensorBoard...")
-    fi_df = log_feature_importance_to_tensorboard(writer, model, feature_names, step)
-    if fi_df is not None:
-        results['feature_importance_dataframe'] = fi_df
-    
-    # 4. Misclassification Analysis
-    logger.info("🔍 Logging misclassification patterns to TensorBoard...")
-    misclass_df = log_misclassification_analysis_to_tensorboard(writer, y_test, y_pred, labels, step)
-    results['misclassification_dataframe'] = misclass_df
-    
-    # 5. Advanced Metrics
-    logger.info("📋 Logging advanced metrics to TensorBoard...")
-    advanced_metrics = log_advanced_metrics_to_tensorboard(writer, y_test, y_pred, step)
-    results['advanced_metrics'] = advanced_metrics
-    
-    # Log text summary
+    # Log text summary (only once)
     summary_text = f"""
     Model Evaluation Summary
     ========================
@@ -488,6 +514,8 @@ def run_comprehensive_evaluation(model, X_test, y_test, feature_names, writer, s
     Weighted F1: {advanced_metrics['overall_metrics']['weighted_avg']['f1_score']:.2%}
     
     Test Samples: {len(y_test)}
+    Feature Count: {len(feature_names)}
+    Features: {', '.join(feature_names)}
     """
     writer.add_text('evaluation_summary', summary_text, step)
     
@@ -503,5 +531,6 @@ def run_comprehensive_evaluation(model, X_test, y_test, feature_names, writer, s
     logger.info(f"   Matthews Corr: {advanced_metrics['overall_metrics']['matthews_corrcoef']:.3f}")
     logger.info(f"   Macro F1: {advanced_metrics['overall_metrics']['macro_avg']['f1_score']:.2%}")
     logger.info(f"   Weighted F1: {advanced_metrics['overall_metrics']['weighted_avg']['f1_score']:.2%}")
+    logger.info(f"   Features: {len(feature_names)} (including sin/cos: {sum(1 for f in feature_names if 'sin' in f or 'cos' in f)})")
     
     return results
