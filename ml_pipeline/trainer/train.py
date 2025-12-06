@@ -187,36 +187,7 @@ def train_model(df, feature_cols, config):
     return pipeline, metrics, X_test, y_test, y_pred
 
 
-def generate_confusion_matrix(y_true, y_pred, labels, output_path):
-    """Generate and save confusion matrix visualization with percentages."""
-    cm = confusion_matrix(y_true, y_pred, labels=labels)
-    
-    # Calculate percentages for each row (true class)
-    cm_percent = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis] * 100
-    
-    # Create annotations with both counts and percentages
-    annot = np.empty_like(cm, dtype=object)
-    for i in range(cm.shape[0]):
-        for j in range(cm.shape[1]):
-            annot[i, j] = f'{cm[i, j]}\n({cm_percent[i, j]:.1f}%)'
-    
-    fig, ax = plt.subplots(figsize=(12, 10))
-    sns.heatmap(cm, annot=annot, fmt='', cmap='Blues', 
-                xticklabels=labels, yticklabels=labels, ax=ax,
-                cbar_kws={'label': 'Count'})
-    ax.set_title('Confusion Matrix (Count and Percentage)', fontsize=16, pad=20)
-    ax.set_ylabel('True Label', fontsize=14, fontweight='bold')
-    ax.set_xlabel('Predicted Label', fontsize=14, fontweight='bold')
-    
-    # Rotate labels for better readability
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
-    plt.setp(ax.get_yticklabels(), rotation=0)
-    
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=150, bbox_inches='tight')
-    plt.close()
-    
-    logger.info(f"✅ Confusion matrix saved to {output_path}")
+# Removed generate_confusion_matrix - all visualizations now go to TensorBoard only
 
 
 def log_training_metrics_to_tensorboard(writer, config, metrics, y_test, y_pred):
