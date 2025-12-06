@@ -369,9 +369,19 @@ if __name__ == '__main__':
         output_dir = os.environ.get('AIP_MODEL_DIR', '/tmp/model')
         os.makedirs(output_dir, exist_ok=True)
         
-        # Create TensorBoard writer for comprehensive evaluation
-        tensorboard_log_dir = os.path.join(output_dir, 'tensorboard_logs')
-        os.makedirs(tensorboard_log_dir, exist_ok=True)
+        # Create TensorBoard writer - use Vertex AI's TensorBoard path if available
+        # This ensures logs are written directly where Vertex AI TensorBoard expects them
+        tensorboard_gcs_path = os.environ.get('AIP_TENSORBOARD_LOG_DIR')
+        if tensorboard_gcs_path:
+            # Vertex AI provides a GCS path - write directly there
+            logger.info(f"📊 Writing TensorBoard logs to Vertex AI path: {tensorboard_gcs_path}")
+            tensorboard_log_dir = tensorboard_gcs_path
+        else:
+            # Fallback to local directory for non-Vertex AI training
+            tensorboard_log_dir = os.path.join(output_dir, 'tensorboard_logs')
+            os.makedirs(tensorboard_log_dir, exist_ok=True)
+            logger.info(f"📊 Writing TensorBoard logs locally: {tensorboard_log_dir}")
+        
         writer = SummaryWriter(log_dir=tensorboard_log_dir)
         
         # Run comprehensive evaluation (logs everything to TensorBoard)
@@ -392,8 +402,8 @@ if __name__ == '__main__':
         
         writer.close()
         
-        # Upload TensorBoard logs to GCS if Vertex AI TensorBoard is configured
-        upload_tensorboard_logs(tensorboard_log_dir, config)
+        # No need to upload - logs are already written to Vertex AI's GCS path
+        logger.info(f"✅ TensorBoard logs written to: {tensorboard_log_dir}")
         
         # Save model and metrics
         save_model(pipeline, feature_cols, metrics, config)
