@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `evaluate_model.py` script allows you to run comprehensive model evaluation **without retraining or data collection**. This is useful for:
+The `local_evaluation.py` script allows you to run comprehensive model evaluation **without retraining or data collection**. This is useful for:
 
 - ✅ Quickly generating confusion matrices and metrics for existing models
 - ✅ Comparing different model versions
@@ -15,7 +15,7 @@ The `evaluate_model.py` script allows you to run comprehensive model evaluation 
 
 ```bash
 cd ml_pipeline/trainer
-python evaluate_model.py
+python local_evaluation.py
 ```
 
 This will:
@@ -26,7 +26,7 @@ This will:
 ### Evaluate Specific Model Version
 
 ```bash
-python evaluate_model.py \
+python local_evaluation.py \
   --model-path models/crop_classifier_archive/crop_classifier_20251205_2255 \
   --output-dir ./results_v1
 ```
@@ -34,7 +34,7 @@ python evaluate_model.py \
 ### Evaluate Local Model
 
 ```bash
-python evaluate_model.py \
+python local_evaluation.py \
   --model-path ./my_local_model \
   --local \
   --output-dir ./local_results
@@ -58,7 +58,7 @@ python evaluate_model.py \
 
 ```bash
 # Evaluate latest production model
-python evaluate_model.py
+python local_evaluation.py
 ```
 
 **Output:**
@@ -75,12 +75,12 @@ python evaluate_model.py
 
 ```bash
 # Evaluate version 1
-python evaluate_model.py \
+python local_evaluation.py \
   --model-path models/crop_classifier_archive/crop_classifier_20251205_2200 \
   --output-dir ./results_v1
 
 # Evaluate version 2
-python evaluate_model.py \
+python local_evaluation.py \
   --model-path models/crop_classifier_archive/crop_classifier_20251205_2255 \
   --output-dir ./results_v2
 
@@ -97,7 +97,7 @@ bq query --use_legacy_sql=false --format=csv \
   > test_data.csv
 
 # Evaluate with custom test data
-python evaluate_model.py \
+python local_evaluation.py \
   --model-path models/crop_classifier_latest \
   --test-data test_data.csv
 ```
@@ -106,7 +106,7 @@ python evaluate_model.py \
 
 ```bash
 # Use 30% of data for testing (instead of default 20%)
-python evaluate_model.py \
+python local_evaluation.py \
   --model-path models/crop_classifier_latest \
   --test-split 0.3
 ```
@@ -160,7 +160,7 @@ gsutil ls gs://carboncheck-data/models/crop_classifier_latest/
 
 **Fix**: Ensure you're using the same `config.yaml` that was used during training, or load it from GCS:
 ```bash
-python evaluate_model.py --config config/config.yaml
+python local_evaluation.py --config config/config.yaml
 ```
 
 ### Error: "No module named 'seaborn'"
@@ -179,7 +179,7 @@ gcloud auth application-default login
 
 ## Integration with Training Pipeline
 
-The evaluation script uses the **same evaluation module** (`model_evaluation.py`) as the training pipeline, ensuring consistency. The only difference is:
+The evaluation script uses the **same evaluation module** (`tensorboard_utils.py`) as the training pipeline, ensuring consistency. The only difference is:
 
 - **Training**: Evaluation runs automatically after training
 - **Standalone**: You can run evaluation anytime on any saved model
@@ -189,7 +189,7 @@ The evaluation script uses the **same evaluation module** (`model_evaluation.py`
 ### 1. **Quick Model Check**
 After deploying a new model, quickly verify it's performing well:
 ```bash
-python evaluate_model.py
+python local_evaluation.py
 open evaluation_output/confusion_matrix_enhanced.png
 ```
 
@@ -197,7 +197,7 @@ open evaluation_output/confusion_matrix_enhanced.png
 Compare performance across multiple model versions:
 ```bash
 for version in v1 v2 v3; do
-  python evaluate_model.py \
+  python local_evaluation.py \
     --model-path models/archive/model_$version \
     --output-dir results_$version
 done
@@ -206,7 +206,7 @@ done
 ### 3. **Debugging Performance Issues**
 If production metrics look off, evaluate the deployed model:
 ```bash
-python evaluate_model.py \
+python local_evaluation.py \
   --model-path models/crop_classifier_latest \
   --output-dir debug_results
 ```
@@ -219,7 +219,7 @@ Then check:
 ### 4. **Stakeholder Reports**
 Generate professional visualizations for presentations:
 ```bash
-python evaluate_model.py \
+python local_evaluation.py \
   --model-path models/crop_classifier_latest \
   --output-dir stakeholder_report
 
@@ -246,5 +246,5 @@ After running evaluation:
 
 **See Also**:
 - `MODEL_EVALUATION_GUIDE.md` - How to interpret evaluation results
-- `train.py` - Training script (includes automatic evaluation)
+- `vertex_ai_training.py` - Training script (includes automatic evaluation)
 

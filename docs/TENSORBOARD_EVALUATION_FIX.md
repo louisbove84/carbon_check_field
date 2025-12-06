@@ -9,7 +9,7 @@ The TensorBoard setup for the `carbon_check_field` ML pipeline had two main issu
 
 ## Solution
 
-Created a comprehensive **Model Evaluation Module** (`ml_pipeline/trainer/model_evaluation.py`) that generates:
+Created a comprehensive **Model Evaluation Module** (`ml_pipeline/trainer/tensorboard_utils.py`) that generates:
 
 ### 1. Enhanced Confusion Matrix (`confusion_matrix_enhanced.png`)
 - **3 side-by-side views**:
@@ -53,16 +53,16 @@ Created a comprehensive **Model Evaluation Module** (`ml_pipeline/trainer/model_
 
 ### Files Modified
 
-1. **`ml_pipeline/trainer/train.py`**:
+1. **`ml_pipeline/trainer/vertex_ai_training.py`**:
    - Added import: `from model_evaluation import run_comprehensive_evaluation`
    - Modified `train_model()` to return `X_test` (needed for evaluation)
    - Added evaluation call after training, before TensorBoard logging
    - Outputs saved to `evaluation/` subdirectory
 
 2. **`ml_pipeline/trainer/Dockerfile`**:
-   - Added `COPY model_evaluation.py .` to include the new module in Docker image
+   - Added `COPY tensorboard_utils.py .` to include the new module in Docker image
 
-3. **`ml_pipeline/trainer/model_evaluation.py`**:
+3. **`ml_pipeline/trainer/tensorboard_utils.py`**:
    - New file with 486 lines
    - 5 main functions for different evaluation types
    - 1 master function `run_comprehensive_evaluation()` that orchestrates everything
@@ -210,7 +210,7 @@ No new dependencies were added.
 **Status**: ✅ **Deployed**
 
 - Committed to GitHub: `3c68eb1`
-- Docker image updated to include `model_evaluation.py`
+- Docker image updated to include `tensorboard_utils.py`
 - Full pipeline triggered and running in background
 
 **Next**: Wait for pipeline to complete (~30 min), then review evaluation artifacts.
@@ -235,7 +235,7 @@ Potential additions (not yet implemented):
 6. **SHAP Values**: Explain individual predictions
 7. **Embedding Visualization**: t-SNE/UMAP of feature space
 
-These can be added to `model_evaluation.py` as needed.
+These can be added to `tensorboard_utils.py` as needed.
 
 ---
 

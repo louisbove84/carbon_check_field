@@ -3,7 +3,7 @@ Standalone script to evaluate an existing trained model.
 This allows running comprehensive evaluation without retraining or data collection.
 
 Usage:
-    python evaluate_model.py [--model-path MODEL_PATH] [--output-dir OUTPUT_DIR]
+    python local_evaluation.py [--model-path MODEL_PATH] [--output-dir OUTPUT_DIR]
 """
 
 import os
@@ -19,7 +19,7 @@ from sklearn.pipeline import Pipeline
 # Add current directory to path
 sys.path.insert(0, os.path.dirname(__file__))
 
-from model_evaluation import run_comprehensive_evaluation
+from tensorboard_utils import run_comprehensive_evaluation
 from feature_engineering import engineer_features_dataframe, compute_elevation_quantiles
 from torch.utils.tensorboard import SummaryWriter
 
@@ -52,7 +52,7 @@ def load_config(config_path=None, bucket_name=None):
             with open(local_config_path, 'r') as f:
                 return yaml.safe_load(f)
         
-        # Try loading from GCS (same as train.py)
+        # Try loading from GCS (same as vertex_ai_training.py)
         try:
             from google.cloud import storage
             import yaml
@@ -199,16 +199,16 @@ def main():
         epilog="""
 Examples:
   # Evaluate latest model from GCS
-  python evaluate_model.py --model-path models/crop_classifier_latest --output-dir ./evaluation_results
+  python local_evaluation.py --model-path models/crop_classifier_latest --output-dir ./evaluation_results
 
   # Evaluate specific archived model
-  python evaluate_model.py --model-path models/crop_classifier_archive/crop_classifier_20251205_2255
+  python local_evaluation.py --model-path models/crop_classifier_archive/crop_classifier_20251205_2255
 
   # Evaluate local model
-  python evaluate_model.py --model-path ./local_model --output-dir ./results
+  python local_evaluation.py --model-path ./local_model --output-dir ./results
 
   # Use custom test data
-  python evaluate_model.py --model-path models/crop_classifier_latest --test-data ./test_data.csv
+  python local_evaluation.py --model-path models/crop_classifier_latest --test-data ./test_data.csv
         """
     )
     

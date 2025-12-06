@@ -45,7 +45,7 @@ if gcs_prefix:
 
 ### Files Changed
 
-- `/ml_pipeline/trainer/train.py` (line 441)
+- `/ml_pipeline/trainer/vertex_ai_training.py` (line 441)
 
 ## Verification
 

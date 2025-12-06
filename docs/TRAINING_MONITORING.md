@@ -160,7 +160,7 @@ gs://ml-pipeline-477612-training/training_output/logs//
 ```bash
 # Run local evaluation to test TensorBoard logging
 cd /Users/beuxb/Desktop/Projects/carbon_check_field/ml_pipeline/trainer
-python evaluate_model.py \
+python local_evaluation.py \
   --model-path gs://carboncheck-data/models/crop_classifier_latest/model.joblib \
   --output-dir ./test_tensorboard \
   --num-runs 2

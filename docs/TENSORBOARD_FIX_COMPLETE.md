@@ -4,15 +4,15 @@
 
 ### Issue #1: `gsutil` Command Not Found
 - **Fixed:** Replaced subprocess `gsutil` with `google.cloud.storage` Python client
-- **Location:** `train.py` lines 429-450
+- **Location:** `vertex_ai_training.py` lines 429-450
 
 ### Issue #2: SummaryWriter Writing to GCS Path
 - **Fixed:** Changed from `os.path.join(AIP_MODEL_DIR, 'tensorboard_logs')` to hardcoded `/tmp/tensorboard_logs`
-- **Location:** `train.py` line 373
+- **Location:** `vertex_ai_training.py` line 373
 
 ### Issue #3: Double Slash in GCS Path
 - **Fixed:** Added `clean_prefix = gcs_prefix.rstrip('/')` before path concatenation
-- **Location:** `train.py` lines 284, 442
+- **Location:** `vertex_ai_training.py` lines 284, 442
 
 ## Cleanup Complete
 
@@ -21,9 +21,9 @@
 - `ml_pipeline/trainer/train_simple_test.py`
 
 ### Files Kept ✅
-- `ml_pipeline/trainer/train.py` - Main training script (all fixes applied)
-- `ml_pipeline/trainer/evaluate_model.py` - Standalone evaluation tool
-- `ml_pipeline/trainer/model_evaluation.py` - Evaluation utilities
+- `ml_pipeline/trainer/vertex_ai_training.py` - Main training script (all fixes applied)
+- `ml_pipeline/trainer/local_evaluation.py` - Standalone evaluation tool
+- `ml_pipeline/trainer/tensorboard_utils.py` - Evaluation utilities
 - `ml_pipeline/trainer/feature_engineering.py` - Feature engineering module
 
 ## Verification

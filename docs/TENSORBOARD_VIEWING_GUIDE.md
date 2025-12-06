@@ -114,7 +114,7 @@ Run this locally to verify TensorBoard is working:
 
 ```bash
 cd /Users/beuxb/Desktop/Projects/carbon_check_field/ml_pipeline/trainer
-python evaluate_model.py --model-path gs://carboncheck-data/models/crop_classifier_latest/model.joblib --output-dir ./test_tensorboard --num-runs 2
+python local_evaluation.py --model-path gs://carboncheck-data/models/crop_classifier_latest/model.joblib --output-dir ./test_tensorboard --num-runs 2
 
 # Then view it:
 tensorboard --logdir=./test_tensorboard/tensorboard_logs

@@ -2,7 +2,7 @@
 Shared Feature Engineering Module
 =================================
 This module contains feature engineering functions used by both:
-1. Training pipeline (train.py)
+1. Training pipeline (vertex_ai_training.py)
 2. Prediction API (backend/app.py)
 
 This ensures feature engineering is consistent between training and inference.

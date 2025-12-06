@@ -175,7 +175,7 @@ WHERE deployment_decision = 'blocked'
 ORDER BY deployment_time DESC LIMIT 3
 ```
 
-Adjust gates in `model_evaluation.py` if too strict.
+Adjust gates in `tensorboard_utils.py` if too strict.
 
 ---
 

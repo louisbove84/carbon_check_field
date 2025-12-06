@@ -42,10 +42,10 @@ ml_pipeline/
 │   └── deploy.sh             # Deploy to Cloud Run
 │
 ├── trainer/                  # Vertex AI training container
-│   ├── train.py             # Training script
+│   ├── vertex_ai_training.py             # Training script
 │   ├── Dockerfile           # ML-optimized image
 │   ├── requirements.txt     # ML libraries
-│   └── build.sh             # Build & push to Artifact Registry
+│   └── build_docker.sh             # Build & push to Artifact Registry
 │
 └── config.yaml              # Shared configuration
 ```
@@ -60,7 +60,7 @@ Build and push the training container to Artifact Registry:
 
 ```bash
 cd trainer
-./build.sh
+./build_docker.sh
 ```
 
 **What this does:**
@@ -205,7 +205,7 @@ gcloud projects add-iam-policy-binding ml-pipeline-477612 \
 **Error:** `Container image not found`  
 **Fix:** Rebuild trainer container:
 ```bash
-cd trainer && ./build.sh
+cd trainer && ./build_docker.sh
 ```
 
 ### Model doesn't deploy
@@ -227,14 +227,14 @@ curl -X POST http://localhost:8080
 ### Test Trainer Locally
 ```bash
 cd trainer
-python train.py
+python vertex_ai_training.py
 ```
 
 ---
 
 ## 📚 Next Steps
 
-1. ✅ Build trainer container (`cd trainer && ./build.sh`)
+1. ✅ Build trainer container (`cd trainer && ./build_docker.sh`)
 2. ✅ Deploy orchestrator (`cd orchestrator && ./deploy.sh`)
 3. ✅ Run pipeline (`curl -X POST <service-url>`)
 4. ✅ Set up Cloud Scheduler for monthly runs

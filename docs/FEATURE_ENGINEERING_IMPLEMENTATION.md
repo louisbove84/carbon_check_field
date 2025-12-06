@@ -76,7 +76,7 @@
    - Enhanced prediction parsing for real confidence scores
    - Loads elevation quantiles from config
 
-3. **`ml_pipeline/trainer/train.py`**
+3. **`ml_pipeline/trainer/vertex_ai_training.py`**
    - Uses shared feature engineering module
    - Computes elevation quantiles from training data
    - Updates config.yaml with quantiles

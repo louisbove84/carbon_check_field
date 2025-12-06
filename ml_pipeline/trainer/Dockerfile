@@ -14,13 +14,13 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy training scripts and modules
-COPY train.py .
+COPY vertex_ai_training.py .
 COPY feature_engineering.py .
-COPY model_evaluation.py .
+COPY tensorboard_utils.py .
 
 # Vertex AI will set AIP_MODEL_DIR environment variable
 ENV PYTHONUNBUFFERED=1
 
 # Run training script
-ENTRYPOINT ["python", "train.py"]
+ENTRYPOINT ["python", "vertex_ai_training.py"]
 

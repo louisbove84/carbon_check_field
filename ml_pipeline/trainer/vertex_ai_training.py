@@ -35,7 +35,7 @@ from torch.utils.tensorboard import SummaryWriter
 import io
 from PIL import Image
 from feature_engineering import engineer_features_dataframe, compute_elevation_quantiles
-from model_evaluation import run_comprehensive_evaluation
+from tensorboard_utils import run_comprehensive_evaluation
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
