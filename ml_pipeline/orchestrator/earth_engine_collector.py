@@ -121,9 +121,101 @@ def sample_crop_fields(crop_info: Dict[str, Any], cdl_year: int,
     return all_samples
 
 
+def sample_non_crop_areas(config: Dict[str, Any], cdl_year: int, 
+                          num_fields: int, num_samples_per_field: int) -> ee.FeatureCollection:
+    """
+    Sample non-crop areas (buildings, roads, lakes, trees, etc.) for 'Other' category.
+    Samples from areas that are NOT in the crop codes list.
+    
+    Args:
+        config: Pipeline configuration dict
+        cdl_year: CDL year to use
+        num_fields: Number of fields to sample
+        num_samples_per_field: Number of samples per field
+    
+    Returns:
+        FeatureCollection with 'Other' category samples
+    """
+    project_id = config['project']['id']
+    crops = config['data_collection']['crops']
+    
+    # Get all crop codes to exclude
+    crop_codes = [crop['code'] for crop in crops]
+    
+    logger.info(f"🌍 Collecting samples for 'Other' category (non-crop areas)")
+    logger.info(f"   Excluding crop codes: {crop_codes}")
+    
+    target_samples = num_fields * num_samples_per_field
+    logger.info(f"   🎯 Target: {target_samples} samples")
+    
+    # Load CDL
+    cdl = ee.Image(f'USDA/NASS/CDL/{cdl_year}').select('cropland')
+    
+    # Create mask for non-crop areas (exclude all crop codes)
+    # Start with all pixels, then mask out crop codes
+    non_crop_mask = cdl
+    for crop_code in crop_codes:
+        non_crop_mask = non_crop_mask.updateMask(non_crop_mask.neq(crop_code))
+    
+    # Use a mix of counties from different regions for diversity
+    # Sample from the same counties used for crops, but get non-crop areas
+    counties_fc = ee.FeatureCollection('TIGER/2018/Counties')
+    
+    # Collect all unique counties from crop definitions
+    all_counties = []
+    for crop in crops:
+        all_counties.extend(crop.get('counties', []))
+    unique_counties = list(set(all_counties))[:10]  # Use up to 10 counties for diversity
+    
+    all_samples = ee.FeatureCollection([])
+    samples_collected = 0
+    
+    for i, county_geoid in enumerate(unique_counties):
+        if samples_collected >= target_samples:
+            break
+        
+        # Get county geometry
+        county_region = counties_fc.filter(ee.Filter.eq('GEOID', county_geoid)).geometry()
+        
+        # How many more samples do we need?
+        samples_needed = target_samples - samples_collected
+        
+        # Sample from non-crop areas in this county
+        county_samples = non_crop_mask.sample(
+            region=county_region,
+            scale=30,
+            numPixels=samples_needed * 500,  # 500x buffer
+            seed=999 + i,  # Different seed for 'Other' category
+            geometries=True,
+            tileScale=16
+        )
+        
+        # Limit to what we need
+        samples_to_add = county_samples.limit(samples_needed)
+        all_samples = all_samples.merge(samples_to_add)
+        
+        samples_collected += samples_needed
+        logger.info(f"   📦 County {i+1} (GEOID: {county_geoid}): ~{samples_needed} samples")
+    
+    logger.info(f"   ✅ Collected samples from {min(len(unique_counties), len(unique_counties))} counties")
+    
+    # Add 'Other' category info to each sample
+    all_samples = all_samples.map(lambda feature: feature.set({
+        'crop': 'Other',
+        'crop_code': 0  # Use 0 for 'Other' category
+    }))
+    
+    # Extract NDVI features for each sample
+    all_samples = all_samples.map(lambda feature: extract_features(
+        feature.geometry(), cdl_year
+    ).copyProperties(feature))
+    
+    return all_samples
+
+
 def collect_training_data(config: Dict[str, Any]) -> ee.FeatureCollection:
     """
-    Collect training data for all crops.
+    Collect training data for all crops plus 'Other' category.
     
     Args:
         config: Pipeline configuration dict
@@ -137,6 +229,10 @@ def collect_training_data(config: Dict[str, Any]) -> ee.FeatureCollection:
     num_samples_per_field = config.get('data_collection', {}).get('num_samples_per_field', 3)
     crops = config['data_collection']['crops']
     
+    # Check if 'Other' category should be collected
+    collect_other = config.get('data_collection', {}).get('collect_other', True)
+    num_other_fields = config.get('data_collection', {}).get('num_other_fields', num_fields_per_crop)
+    
     # Initialize Earth Engine
     initialize_earth_engine(project_id)
     
@@ -148,6 +244,16 @@ def collect_training_data(config: Dict[str, Any]) -> ee.FeatureCollection:
             crop, cdl_year, num_fields_per_crop, num_samples_per_field
         )
         all_training_data = all_training_data.merge(crop_samples)
+    
+    # Collect 'Other' category samples (non-crop areas)
+    if collect_other:
+        logger.info("")
+        logger.info("🌍 Collecting 'Other' category (non-crop areas)...")
+        other_samples = sample_non_crop_areas(
+            config, cdl_year, num_other_fields, num_samples_per_field
+        )
+        all_training_data = all_training_data.merge(other_samples)
+        logger.info("✅ 'Other' category samples collected")
     
     return all_training_data
 
@@ -188,7 +294,8 @@ def export_to_bigquery(feature_collection: ee.FeatureCollection,
             'field_id', 'crop', 'crop_code',
             'ndvi_mean', 'ndvi_std', 'ndvi_min', 'ndvi_max',
             'ndvi_p25', 'ndvi_p50', 'ndvi_p75',
-            'ndvi_early', 'ndvi_late', 'elevation_m',
+            'ndvi_early', 'ndvi_late',
+            # REMOVED: 'elevation_m' — elevation removed from feature set
             # REMOVED: 'longitude', 'latitude' — model no longer uses geographic cheating
         ]
     )

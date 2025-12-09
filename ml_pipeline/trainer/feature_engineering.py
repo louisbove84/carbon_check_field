@@ -37,52 +37,7 @@ def encode_location(latitude: float, longitude: float) -> List[float]:
     ]
 
 
-def bin_elevation_quantile(elevation_m: float, quantiles: Dict[str, float]) -> int:
-    """
-    Bin elevation into quantile-based zones.
-    
-    Args:
-        elevation_m: Elevation in meters
-        quantiles: Dict with 'q25', 'q50', 'q75' keys from training data
-    
-    Returns:
-        0: Low (< q25)
-        1: Medium (q25 to q50)
-        2: High (q50 to q75)
-        3: Very High (> q75)
-    """
-    if elevation_m < quantiles['q25']:
-        return 0  # Low
-    elif elevation_m < quantiles['q50']:
-        return 1  # Medium
-    elif elevation_m < quantiles['q75']:
-        return 2  # High
-    else:
-        return 3  # Very High
-
-
-def compute_elevation_quantiles(df: pd.DataFrame) -> Dict[str, float]:
-    """
-    Compute elevation quantiles from training data.
-    Call this during training and save quantiles to config.
-    
-    Args:
-        df: Training dataframe with 'elevation_m' column
-    
-    Returns:
-        Dict with 'q25', 'q50', 'q75' quantile values
-    """
-    if 'elevation_m' not in df.columns:
-        # Default quantiles if no elevation data
-        return {'q25': 200.0, 'q50': 500.0, 'q75': 1000.0}
-    
-    quantiles = df['elevation_m'].quantile([0.25, 0.50, 0.75]).to_dict()
-    
-    return {
-        'q25': float(quantiles[0.25]),
-        'q50': float(quantiles[0.50]),
-        'q75': float(quantiles[0.75])
-    }
+# REMOVED: Elevation binning functions — elevation removed from feature set
 
 
 def engineer_features_from_raw(
@@ -95,20 +50,20 @@ def engineer_features_from_raw(
     ndvi_p75: float,
     ndvi_early: float,
     ndvi_late: float,
-    elevation_m: float,
+    # REMOVED: elevation_m — elevation removed from feature set
     # REMOVED: latitude, longitude — model no longer uses geographic cheating
-    elevation_quantiles: Dict[str, float]
 ) -> List[float]:
     """
     Engineer all features from raw values.
     This is the single source of truth for feature engineering.
     
     Args:
-        All raw feature values
-        elevation_quantiles: Quantiles dict from training data
+        All raw NDVI feature values
+        # REMOVED: elevation_m, elevation_quantiles — elevation removed from feature set
+        # REMOVED: latitude, longitude — model no longer uses geographic cheating
     
     Returns:
-        List of 15 engineered features in exact order (removed 4 location features)
+        List of 14 engineered features in exact order (removed 4 location + 1 elevation features)
     """
     # Derived NDVI features
     ndvi_range = ndvi_max - ndvi_min
@@ -118,13 +73,11 @@ def engineer_features_from_raw(
     ndvi_late_ratio = ndvi_late / (ndvi_mean + 0.001)
     
     # REMOVED: Encode location (sin/cos) — model no longer uses geographic cheating
-    # location_features = encode_location(latitude, longitude)
-    
-    # Bin elevation (quantile-based)
-    elevation_binned = bin_elevation_quantile(elevation_m, elevation_quantiles)
+    # REMOVED: Bin elevation — elevation removed from feature set
     
     # Return features in exact order (must match training!)
     # REMOVED: lat_sin, lat_cos, lon_sin, lon_cos (4 features)
+    # REMOVED: elevation_binned (1 feature)
     features = [
         ndvi_mean,
         ndvi_std,
@@ -135,7 +88,7 @@ def engineer_features_from_raw(
         ndvi_p75,
         ndvi_early,
         ndvi_late,
-        float(elevation_binned),  # Binned elevation
+        # REMOVED: float(elevation_binned),  # Binned elevation
         # REMOVED: location_features[0],  # lat_sin
         # REMOVED: location_features[1],  # lat_cos
         # REMOVED: location_features[2],  # lon_sin
@@ -150,13 +103,13 @@ def engineer_features_from_raw(
     return features
 
 
-def engineer_features_dataframe(df: pd.DataFrame, elevation_quantiles: Dict[str, float]) -> Tuple[pd.DataFrame, List[str]]:
+def engineer_features_dataframe(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
     """
     Engineer features for training dataframe.
     
     Args:
         df: DataFrame with raw features
-        elevation_quantiles: Quantiles from training data
+        # REMOVED: elevation_quantiles — elevation removed from feature set
     
     Returns:
         (df_enhanced, feature_columns)
@@ -164,15 +117,7 @@ def engineer_features_dataframe(df: pd.DataFrame, elevation_quantiles: Dict[str,
     df = df.copy()
     
     # REMOVED: Encode location features — model no longer uses geographic cheating
-    # df['lat_sin'] = df['latitude'].apply(lambda x: math.sin(math.radians(x)))
-    # df['lat_cos'] = df['latitude'].apply(lambda x: math.cos(math.radians(x)))
-    # df['lon_sin'] = df['longitude'].apply(lambda x: math.sin(math.radians(x)))
-    # df['lon_cos'] = df['longitude'].apply(lambda x: math.cos(math.radians(x)))
-    
-    # Bin elevation
-    df['elevation_binned'] = df['elevation_m'].apply(
-        lambda x: bin_elevation_quantile(x, elevation_quantiles)
-    )
+    # REMOVED: Bin elevation — elevation removed from feature set
     
     # Derived NDVI features
     df['ndvi_range'] = df['ndvi_max'] - df['ndvi_min']
@@ -183,6 +128,7 @@ def engineer_features_dataframe(df: pd.DataFrame, elevation_quantiles: Dict[str,
     
     # Feature column order (must match engineer_features_from_raw!)
     # REMOVED: lat_sin, lat_cos, lon_sin, lon_cos — model no longer uses geographic cheating
+    # REMOVED: elevation_binned — elevation removed from feature set
     feature_cols = [
         'ndvi_mean',
         'ndvi_std',
@@ -193,7 +139,7 @@ def engineer_features_dataframe(df: pd.DataFrame, elevation_quantiles: Dict[str,
         'ndvi_p75',
         'ndvi_early',
         'ndvi_late',
-        'elevation_binned',
+        # REMOVED: 'elevation_binned',  # Elevation removed from feature set
         # REMOVED: 'lat_sin', 'lat_cos', 'lon_sin', 'lon_cos' — model no longer uses geographic cheating
         'ndvi_range',
         'ndvi_iqr',

@@ -118,6 +118,10 @@ data_collection:
         - "48179"  # Texas - Gray
         - "31081"  # Nebraska - Hamilton
         - "31089"  # Nebraska - Holt
+  
+  # 'Other' category settings (non-crop areas: buildings, roads, lakes, trees, etc.)
+  collect_other: true  # Set to false to skip 'Other' category collection
+  num_other_fields: 30  # Number of non-crop fields to sample (same as crops by default)
 
 # ============================================================
 # QUALITY GATES (Most commonly adjusted!)

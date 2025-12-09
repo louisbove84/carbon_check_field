@@ -19,6 +19,12 @@ from sklearn.metrics import (
 )
 from sklearn.ensemble import RandomForestClassifier
 from torch.utils.tensorboard import SummaryWriter
+from visualization_utils import (
+    create_confusion_matrix_figures,
+    create_per_crop_metrics_figures,
+    create_feature_importance_figure,
+    create_advanced_metrics_figure
+)
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -28,83 +34,107 @@ def _convert_figure_to_tensorboard_image(fig):
     """
     Convert matplotlib figure to TensorBoard-compatible image array.
     Returns numpy array in CHW format (channels, height, width) with values in [0, 1].
+    
+    Tries multiple approaches to ensure compatibility with TensorBoard on GCP.
     """
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
-    buf.seek(0)
-    image = Image.open(buf)
-    # Convert RGBA to RGB if needed (TensorBoard expects RGB)
-    if image.mode == 'RGBA':
-        image = image.convert('RGB')
-    image_array = np.array(image)
-    # Ensure CHW format (channels, height, width) - TensorBoard requirement
-    if len(image_array.shape) == 3:
-        image_array = np.transpose(image_array, (2, 0, 1))
-    # Normalize to [0, 1] range as float32 (required for TensorBoard display)
-    if image_array.dtype != np.float32:
+    import tempfile
+    
+    # Method 1: Try using temporary file (more reliable for GCP TensorBoard)
+    try:
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
+            tmp_path = tmp_file.name
+        
+        # Save figure to temporary file
+        fig.savefig(tmp_path, format='png', dpi=100, bbox_inches='tight', pad_inches=0.1, facecolor='white')
+        
+        # Load image from file
+        image = Image.open(tmp_path)
+        
+        # Convert RGBA to RGB if needed (TensorBoard expects RGB)
+        if image.mode == 'RGBA':
+            # Create white background for RGBA images
+            rgb_image = Image.new('RGB', image.size, (255, 255, 255))
+            rgb_image.paste(image, mask=image.split()[3])  # Use alpha channel as mask
+            image = rgb_image
+        elif image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        # Convert to numpy array (HWC format)
+        image_array = np.array(image, dtype=np.uint8)
+        
+        # Ensure CHW format (channels, height, width) - TensorBoard requirement
+        if len(image_array.shape) == 3:
+            # HWC -> CHW
+            image_array = np.transpose(image_array, (2, 0, 1))
+        elif len(image_array.shape) == 2:
+            # Grayscale: add channel dimension
+            image_array = np.expand_dims(image_array, axis=0)
+        
+        # Normalize to [0, 1] range as float32 (required for TensorBoard display)
         image_array = image_array.astype(np.float32) / 255.0
-    return image_array
+        
+        # Ensure values are in valid range [0, 1]
+        image_array = np.clip(image_array, 0.0, 1.0)
+        
+        # Clean up temp file
+        try:
+            os.unlink(tmp_path)
+        except:
+            pass
+        
+        return image_array
+    
+    except Exception as e:
+        logger.warning(f"⚠️  Temp file method failed, trying BytesIO: {e}")
+        
+        # Fallback: Use BytesIO method
+        buf = io.BytesIO()
+        fig.savefig(buf, format='png', dpi=100, bbox_inches='tight', pad_inches=0.1, facecolor='white')
+        buf.seek(0)
+        
+        image = Image.open(buf)
+        if image.mode == 'RGBA':
+            rgb_image = Image.new('RGB', image.size, (255, 255, 255))
+            rgb_image.paste(image, mask=image.split()[3])
+            image = rgb_image
+        elif image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        image_array = np.array(image, dtype=np.uint8)
+        
+        if len(image_array.shape) == 3:
+            image_array = np.transpose(image_array, (2, 0, 1))
+        elif len(image_array.shape) == 2:
+            image_array = np.expand_dims(image_array, axis=0)
+        
+        image_array = image_array.astype(np.float32) / 255.0
+        image_array = np.clip(image_array, 0.0, 1.0)
+        
+        buf.close()
+        
+        return image_array
 
 
 def log_confusion_matrix_to_tensorboard(writer, y_true, y_pred, labels, step=0):
     """
     Log confusion matrix visualizations to TensorBoard.
-    Creates 3 views: counts+%, percentages, and normalized.
+    Uses shared visualization functions to ensure consistency with MLflow.
     """
-    cm = confusion_matrix(y_true, y_pred, labels=labels)
+    # Use shared visualization function
+    figures = create_confusion_matrix_figures(y_true, y_pred, labels)
     
-    # 1. Counts + Percentages
-    cm_percent = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis] * 100
-    annot = np.empty_like(cm, dtype=object)
-    for i in range(cm.shape[0]):
-        for j in range(cm.shape[1]):
-            annot[i, j] = f'{cm[i, j]}\n({cm_percent[i, j]:.1f}%)'
+    # Log each figure to TensorBoard
+    image_array = _convert_figure_to_tensorboard_image(figures['counts_and_percent'])
+    writer.add_image('confusion_matrix/counts_and_percent', image_array, step, dataformats='CHW')
+    plt.close(figures['counts_and_percent'])
     
-    fig, ax = plt.subplots(figsize=(10, 8))
-    sns.heatmap(cm, annot=annot, fmt='', cmap='Blues', 
-                xticklabels=labels, yticklabels=labels, ax=ax,
-                cbar_kws={'label': 'Count'})
-    ax.set_title('Confusion Matrix (Count + Percentage)', fontsize=14, fontweight='bold')
-    ax.set_ylabel('True Label', fontsize=12)
-    ax.set_xlabel('Predicted Label', fontsize=12)
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
-    plt.tight_layout()
+    image_array = _convert_figure_to_tensorboard_image(figures['percentage'])
+    writer.add_image('confusion_matrix/percentage', image_array, step, dataformats='CHW')
+    plt.close(figures['percentage'])
     
-    # Convert to image tensor
-    image_array = _convert_figure_to_tensorboard_image(fig)
-    writer.add_image('confusion_matrix/counts_and_percent', image_array, step)
-    plt.close(fig)
-    
-    # 2. Percentages only
-    fig, ax = plt.subplots(figsize=(10, 8))
-    sns.heatmap(cm_percent, annot=True, fmt='.1f', cmap='RdYlGn', 
-                xticklabels=labels, yticklabels=labels, ax=ax,
-                vmin=0, vmax=100, cbar_kws={'label': 'Percentage'})
-    ax.set_title('Confusion Matrix (Percentage)', fontsize=14, fontweight='bold')
-    ax.set_ylabel('True Label', fontsize=12)
-    ax.set_xlabel('Predicted Label', fontsize=12)
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
-    plt.tight_layout()
-    
-    image_array = _convert_figure_to_tensorboard_image(fig)
-    writer.add_image('confusion_matrix/percentage', image_array, step)
-    plt.close(fig)
-    
-    # 3. Normalized (0-1)
-    cm_norm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-    fig, ax = plt.subplots(figsize=(10, 8))
-    sns.heatmap(cm_norm, annot=True, fmt='.2f', cmap='viridis', 
-                xticklabels=labels, yticklabels=labels, ax=ax,
-                vmin=0, vmax=1, cbar_kws={'label': 'Normalized'})
-    ax.set_title('Confusion Matrix (Normalized)', fontsize=14, fontweight='bold')
-    ax.set_ylabel('True Label', fontsize=12)
-    ax.set_xlabel('Predicted Label', fontsize=12)
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
-    plt.tight_layout()
-    
-    image_array = _convert_figure_to_tensorboard_image(fig)
-    writer.add_image('confusion_matrix/normalized', image_array, step)
-    plt.close(fig)
+    image_array = _convert_figure_to_tensorboard_image(figures['normalized'])
+    writer.add_image('confusion_matrix/normalized', image_array, step, dataformats='CHW')
+    plt.close(figures['normalized'])
     
     logger.info("✅ Logged confusion matrices to TensorBoard")
 
@@ -112,74 +142,65 @@ def log_confusion_matrix_to_tensorboard(writer, y_true, y_pred, labels, step=0):
 def log_per_crop_metrics_to_tensorboard(writer, y_true, y_pred, labels, step=0):
     """
     Log per-crop metrics charts to TensorBoard.
+    Uses shared visualization functions to ensure consistency with MLflow.
     """
-    precision, recall, f1, support = precision_recall_fscore_support(
-        y_true, y_pred, labels=labels, average=None
-    )
+    # Use shared visualization function
+    figures, metrics_df = create_per_crop_metrics_figures(y_true, y_pred, labels)
     
-    # Create DataFrame
-    metrics_df = pd.DataFrame({
-        'Crop': labels,
-        'Precision': precision,
-        'Recall': recall,
-        'F1-Score': f1,
-        'Support': support
-    })
+    # Log comparison chart
+    image_array = _convert_figure_to_tensorboard_image(figures['comparison'])
+    writer.add_image('per_crop_metrics/comparison', image_array, step, dataformats='CHW')
+    plt.close(figures['comparison'])
     
-    # Chart 1: Grouped bar chart (Precision, Recall, F1)
-    fig, ax = plt.subplots(figsize=(12, 6))
-    x = np.arange(len(labels))
-    width = 0.25
-    
-    ax.bar(x - width, precision, width, label='Precision', alpha=0.8, color='#2ecc71')
-    ax.bar(x, recall, width, label='Recall', alpha=0.8, color='#3498db')
-    ax.bar(x + width, f1, width, label='F1-Score', alpha=0.8, color='#e74c3c')
-    ax.set_ylabel('Score', fontsize=12)
-    ax.set_title('Per-Crop Metrics Comparison', fontsize=14, fontweight='bold')
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=45, ha='right')
-    ax.legend()
-    ax.set_ylim([0, 1.1])
-    ax.axhline(y=1.0, color='gray', linestyle='--', alpha=0.5)
-    ax.grid(axis='y', alpha=0.3)
-    plt.tight_layout()
-    
-    image_array = _convert_figure_to_tensorboard_image(fig)
-    writer.add_image('per_crop_metrics/comparison', image_array, step)
-    plt.close(fig)
-    
-    # Chart 2: F1-Score sorted
-    sorted_df = metrics_df.sort_values('F1-Score', ascending=True)
-    colors = ['#e74c3c' if x < 0.8 else '#f39c12' if x < 0.9 else '#2ecc71' 
-              for x in sorted_df['F1-Score']]
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.barh(sorted_df['Crop'], sorted_df['F1-Score'], color=colors, alpha=0.8)
-    ax.set_xlabel('F1-Score', fontsize=12)
-    ax.set_title('F1-Score by Crop (Sorted)', fontsize=14, fontweight='bold')
-    ax.axvline(x=0.9, color='green', linestyle='--', alpha=0.5, label='Target: 0.9')
-    ax.axvline(x=0.8, color='orange', linestyle='--', alpha=0.5, label='Warning: 0.8')
-    ax.legend()
-    ax.set_xlim([0, 1.1])
-    ax.grid(axis='x', alpha=0.3)
-    plt.tight_layout()
-    
-    image_array = _convert_figure_to_tensorboard_image(fig)
-    writer.add_image('per_crop_metrics/f1_sorted', image_array, step)
-    plt.close(fig)
+    # Log F1 sorted chart
+    image_array = _convert_figure_to_tensorboard_image(figures['f1_sorted'])
+    writer.add_image('per_crop_metrics/f1_sorted', image_array, step, dataformats='CHW')
+    plt.close(figures['f1_sorted'])
     
     # Log individual metrics as scalars
-    for crop in labels:
-        idx = labels.index(crop)
-        writer.add_scalar(f'per_crop/precision/{crop}', precision[idx], step)
-        writer.add_scalar(f'per_crop/recall/{crop}', recall[idx], step)
-        writer.add_scalar(f'per_crop/f1/{crop}', f1[idx], step)
-        writer.add_scalar(f'per_crop/support/{crop}', support[idx], step)
+    for _, row in metrics_df.iterrows():
+        writer.add_scalar(f'per_crop/precision/{row["Crop"]}', row['Precision'], step)
+        writer.add_scalar(f'per_crop/recall/{row["Crop"]}', row['Recall'], step)
+        writer.add_scalar(f'per_crop/f1/{row["Crop"]}', row['F1-Score'], step)
+        writer.add_scalar(f'per_crop/support/{row["Crop"]}', row['Support'], step)
     
     logger.info("✅ Logged per-crop metrics to TensorBoard")
     return metrics_df
 
 
 def log_feature_importance_to_tensorboard(writer, model, feature_names, step=0):
+    """
+    Log feature importance to TensorBoard.
+    Uses shared visualization functions to ensure consistency with MLflow.
+    """
+    # Use shared visualization function
+    result = create_feature_importance_figure(model, feature_names)
+    if result is None:
+        logger.warning("⚠️  Model does not have feature_importances_ attribute")
+        return None
+    
+    fig, filtered_names, filtered_importances = result
+    
+    # Log the figure
+    image_array = _convert_figure_to_tensorboard_image(fig)
+    writer.add_image('feature_importance/top_features', image_array, step, dataformats='CHW')
+    plt.close(fig)
+    
+    # Log top features as scalars
+    indices = np.argsort(filtered_importances)[::-1][:10]
+    for idx in indices:
+        writer.add_scalar(f'feature_importance/{filtered_names[idx]}', filtered_importances[idx], step)
+    
+    logger.info("✅ Logged feature importance to TensorBoard")
+    logger.info(f"   Feature names in importance: {list(filtered_names[:10])}")
+    
+    # Create DataFrame for return
+    importance_df = pd.DataFrame({
+        'Feature': filtered_names,
+        'Importance': filtered_importances
+    }).sort_values('Importance', ascending=False)
+    
+    return importance_df
     """
     Log feature importance analysis to TensorBoard.
     REMOVED: lat/lon features — model no longer uses geographic cheating
@@ -197,10 +218,12 @@ def log_feature_importance_to_tensorboard(writer, model, feature_names, step=0):
     importances = rf_model.feature_importances_
     indices = np.argsort(importances)[::-1]
     
-    # Filter out location features (shouldn't exist, but filter just in case)
+    # Filter out location and elevation features (shouldn't exist, but filter just in case)
     # REMOVED: lat/lon features — model no longer uses geographic cheating
-    location_features = {'lat_sin', 'lat_cos', 'lon_sin', 'lon_cos', 'latitude', 'longitude'}
-    filtered_indices = [i for i in indices if feature_names[i] not in location_features]
+    # REMOVED: elevation features — elevation removed from feature set
+    excluded_features = {'lat_sin', 'lat_cos', 'lon_sin', 'lon_cos', 'latitude', 'longitude',
+                        'elevation_binned', 'elevation_m', 'elevation'}
+    filtered_indices = [i for i in indices if feature_names[i] not in excluded_features]
     filtered_importances = [importances[i] for i in filtered_indices]
     filtered_feature_names = [feature_names[i] for i in filtered_indices]
     
@@ -226,7 +249,7 @@ def log_feature_importance_to_tensorboard(writer, model, feature_names, step=0):
     plt.tight_layout()
     
     image_array = _convert_figure_to_tensorboard_image(fig)
-    writer.add_image('feature_importance/top_features', image_array, step)
+    writer.add_image('feature_importance/top_features', image_array, step, dataformats='CHW')
     plt.close(fig)
     
     # Cumulative importance
@@ -249,7 +272,7 @@ def log_feature_importance_to_tensorboard(writer, model, feature_names, step=0):
     plt.tight_layout()
     
     image_array = _convert_figure_to_tensorboard_image(fig)
-    writer.add_image('feature_importance/cumulative', image_array, step)
+    writer.add_image('feature_importance/cumulative', image_array, step, dataformats='CHW')
     plt.close(fig)
     
     # Log top features as scalars
@@ -307,7 +330,7 @@ def log_misclassification_analysis_to_tensorboard(writer, y_true, y_pred, labels
     plt.tight_layout()
     
     image_array = _convert_figure_to_tensorboard_image(fig)
-    writer.add_image('misclassification/top_patterns', image_array, step)
+    writer.add_image('misclassification/top_patterns', image_array, step, dataformats='CHW')
     plt.close(fig)
     
     logger.info("✅ Logged misclassification analysis to TensorBoard")
@@ -317,90 +340,28 @@ def log_misclassification_analysis_to_tensorboard(writer, y_true, y_pred, labels
 def log_advanced_metrics_to_tensorboard(writer, y_true, y_pred, step=0):
     """
     Log advanced metrics to TensorBoard and return report dict.
+    Uses shared visualization functions to ensure consistency with MLflow.
     """
-    precision, recall, f1, support = precision_recall_fscore_support(
-        y_true, y_pred, labels=sorted(set(y_true)), average=None
-    )
-    
     labels = sorted(set(y_true))
-    cohen_kappa = cohen_kappa_score(y_true, y_pred)
-    mcc = matthews_corrcoef(y_true, y_pred)
-    accuracy = np.sum(y_true == y_pred) / len(y_true)
     
-    precision_weighted = np.average(precision, weights=support)
-    recall_weighted = np.average(recall, weights=support)
-    f1_weighted = np.average(f1, weights=support)
-    
-    precision_macro = np.mean(precision)
-    recall_macro = np.mean(recall)
-    f1_macro = np.mean(f1)
+    # Use shared visualization function
+    fig, metrics_dict = create_advanced_metrics_figure(y_true, y_pred, labels)
     
     # Log scalar metrics
-    writer.add_scalar('metrics/accuracy', accuracy, step)
-    writer.add_scalar('metrics/cohen_kappa', cohen_kappa, step)
-    writer.add_scalar('metrics/matthews_corrcoef', mcc, step)
-    writer.add_scalar('metrics/macro_precision', precision_macro, step)
-    writer.add_scalar('metrics/macro_recall', recall_macro, step)
-    writer.add_scalar('metrics/macro_f1', f1_macro, step)
-    writer.add_scalar('metrics/weighted_precision', precision_weighted, step)
-    writer.add_scalar('metrics/weighted_recall', recall_weighted, step)
-    writer.add_scalar('metrics/weighted_f1', f1_weighted, step)
+    writer.add_scalar('metrics/accuracy', metrics_dict['accuracy'], step)
+    writer.add_scalar('metrics/cohen_kappa', metrics_dict['cohen_kappa'], step)
+    writer.add_scalar('metrics/matthews_corrcoef', metrics_dict['matthews_corrcoef'], step)
+    writer.add_scalar('metrics/macro_precision', metrics_dict['precision_macro'], step)
+    writer.add_scalar('metrics/macro_recall', metrics_dict['recall_macro'], step)
+    writer.add_scalar('metrics/macro_f1', metrics_dict['f1_macro'], step)
     
-    # Bar chart of key metrics
-    fig, ax = plt.subplots(figsize=(10, 6))
-    metrics_names = ['Accuracy', 'Cohen Kappa', 'Matthews Corr.', 'Macro F1', 'Weighted F1']
-    metrics_values = [accuracy, cohen_kappa, mcc, f1_macro, f1_weighted]
-    colors = ['#3498db', '#2ecc71', '#e74c3c', '#f39c12', '#9b59b6']
-    bars = ax.bar(metrics_names, metrics_values, color=colors, alpha=0.8)
-    
-    ax.set_ylabel('Score', fontsize=12)
-    ax.set_title('Overall Model Performance Metrics', fontsize=14, fontweight='bold')
-    ax.set_ylim([0, 1.1])
-    ax.axhline(y=1.0, color='gray', linestyle='--', alpha=0.5)
-    ax.grid(axis='y', alpha=0.3)
-    
-    for bar, val in zip(bars, metrics_values):
-        height = bar.get_height()
-        ax.text(bar.get_x() + bar.get_width()/2., height + 0.02,
-               f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
-    
-    plt.xticks(rotation=15, ha='right')
-    plt.tight_layout()
-    
+    # Log the figure
     image_array = _convert_figure_to_tensorboard_image(fig)
-    writer.add_image('metrics/overall', image_array, step)
+    writer.add_image('metrics/overall', image_array, step, dataformats='CHW')
     plt.close(fig)
     
-    # Create report dict
-    report = {
-        'overall_metrics': {
-            'accuracy': float(accuracy),
-            'cohen_kappa': float(cohen_kappa),
-            'matthews_corrcoef': float(mcc),
-            'macro_avg': {
-                'precision': float(precision_macro),
-                'recall': float(recall_macro),
-                'f1_score': float(f1_macro)
-            },
-            'weighted_avg': {
-                'precision': float(precision_weighted),
-                'recall': float(recall_weighted),
-                'f1_score': float(f1_weighted)
-            }
-        },
-        'per_crop_metrics': {}
-    }
-    
-    for i, crop in enumerate(labels):
-        report['per_crop_metrics'][crop] = {
-            'precision': float(precision[i]),
-            'recall': float(recall[i]),
-            'f1_score': float(f1[i]),
-            'support': int(support[i])
-        }
-    
     logger.info("✅ Logged advanced metrics to TensorBoard")
-    return report
+    return metrics_dict
 
 
 def run_comprehensive_evaluation(model, X_test, y_test, feature_names, writer, step=0, num_runs=1):

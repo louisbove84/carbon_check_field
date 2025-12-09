@@ -34,8 +34,14 @@ from sklearn.metrics import classification_report, accuracy_score, confusion_mat
 from torch.utils.tensorboard import SummaryWriter
 import io
 from PIL import Image
-from feature_engineering import engineer_features_dataframe, compute_elevation_quantiles
+from feature_engineering import engineer_features_dataframe
 from tensorboard_utils import run_comprehensive_evaluation
+import mlflow
+import mlflow.sklearn
+from mlflow_utils import (
+    setup_mlflow_tracking,
+    run_comprehensive_evaluation_mlflow
+)
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -88,37 +94,10 @@ def engineer_features(df, config):
     """Create derived features using shared feature engineering module."""
     logger.info("🔧 Engineering features...")
     
-    # Compute elevation quantiles from training data
-    elevation_quantiles = compute_elevation_quantiles(df)
-    logger.info(f"   Elevation quantiles: {elevation_quantiles}")
-    
-    # Save quantiles to config for use in prediction API
-    try:
-        client = storage.Client()
-        bucket = client.bucket(config['storage']['bucket'])
-        blob = bucket.blob('config/config.yaml')
-        if blob.exists():
-            import yaml
-            config_dict = yaml.safe_load(blob.download_as_text())
-            if 'features' not in config_dict:
-                config_dict['features'] = {}
-            config_dict['features']['elevation_quantiles'] = elevation_quantiles
-            # Update base_columns to reflect new feature structure
-            # REMOVED: lat_sin, lat_cos, lon_sin, lon_cos — model no longer uses geographic cheating
-            config_dict['features']['base_columns'] = [
-                'ndvi_mean', 'ndvi_std', 'ndvi_min', 'ndvi_max',
-                'ndvi_p25', 'ndvi_p50', 'ndvi_p75', 'ndvi_early', 'ndvi_late',
-                'elevation_binned',  # Changed from elevation_m
-                # REMOVED: 'lat_sin', 'lat_cos', 'lon_sin', 'lon_cos' — model no longer uses geographic cheating
-            ]
-            # Save updated config
-            blob.upload_from_string(yaml.dump(config_dict, default_flow_style=False))
-            logger.info("✅ Updated config.yaml with elevation quantiles and new feature columns")
-    except Exception as e:
-        logger.warning(f"⚠️  Could not update config.yaml: {e}")
+    # REMOVED: Elevation quantiles computation — elevation removed from feature set
     
     # Use shared feature engineering
-    df_enhanced, all_features = engineer_features_dataframe(df, elevation_quantiles)
+    df_enhanced, all_features = engineer_features_dataframe(df)
     
     logger.info(f"✅ Created {len(all_features)} features")
     
@@ -372,38 +351,105 @@ if __name__ == '__main__':
         output_dir = os.environ.get('AIP_MODEL_DIR', '/tmp/model')
         os.makedirs(output_dir, exist_ok=True)
         
-        # Create TensorBoard writer
-        # IMPORTANT: SummaryWriter MUST write to a LOCAL path (not GCS)
-        # Even if AIP_MODEL_DIR is a GCS path, we need a local directory for TensorBoard
-        local_tensorboard_dir = '/tmp/tensorboard_logs'
-        os.makedirs(local_tensorboard_dir, exist_ok=True)
-        logger.info(f"📊 Writing TensorBoard logs to LOCAL directory: {local_tensorboard_dir}")
+        # Setup MLflow tracking (use GCS as artifact store)
+        mlflow_artifact_uri = f"gs://{config['storage']['bucket']}/mlflow"
+        mlflow_tracking_uri = f"file:///tmp/mlruns"  # Local tracking, artifacts in GCS
+        setup_mlflow_tracking(tracking_uri=mlflow_tracking_uri, experiment_name="crop-classification")
         
-        # Check if Vertex AI TensorBoard is configured
-        tensorboard_gcs_path = os.environ.get('AIP_TENSORBOARD_LOG_DIR')
-        if tensorboard_gcs_path:
-            logger.info(f"📤 Will upload to Vertex AI TensorBoard: {tensorboard_gcs_path}")
-        
-        writer = SummaryWriter(log_dir=local_tensorboard_dir)
-        
-        # Run comprehensive evaluation (logs everything to TensorBoard)
-        # Use multiple runs to show progression in scalars
-        logger.info("\n🔍 Running comprehensive model evaluation...")
-        eval_results = run_comprehensive_evaluation(
-            model=pipeline,
-            X_test=X_test,
-            y_test=y_test,
-            feature_names=feature_cols,
-            writer=writer,
-            step=0,
-            num_runs=5  # Log 5 runs for progression visualization
-        )
-        
-        # Also log basic training metrics and hyperparameters to TensorBoard
-        log_training_metrics_to_tensorboard(writer, config, metrics, y_test, y_pred)
-        
-        writer.close()
-        logger.info("✅ SummaryWriter closed")
+        # Start MLflow run with GCS artifact URI
+        with mlflow.start_run(run_name=f"training-{datetime.now().strftime('%Y%m%d_%H%M')}") as run:
+            # Set artifact URI to GCS
+            mlflow.set_tracking_uri(mlflow_tracking_uri)
+            logger.info(f"✅ MLflow tracking URI: {mlflow_tracking_uri}")
+            logger.info(f"✅ MLflow artifacts will be stored in: {mlflow_artifact_uri}")
+            # Log hyperparameters
+            mlflow.log_params({
+                'n_estimators': config['model']['n_estimators'],
+                'max_depth': config['model']['max_depth'],
+                'n_features': len(feature_cols),
+                'n_train_samples': len(df_enhanced),
+                'n_test_samples': len(X_test)
+            })
+            
+            # Log metrics
+            mlflow.log_metric("train_accuracy", metrics['train_accuracy'])
+            mlflow.log_metric("test_accuracy", metrics['test_accuracy'])
+            
+            # Create TensorBoard writer
+            # IMPORTANT: SummaryWriter MUST write to a LOCAL path (not GCS)
+            # Even if AIP_MODEL_DIR is a GCS path, we need a local directory for TensorBoard
+            local_tensorboard_dir = '/tmp/tensorboard_logs'
+            os.makedirs(local_tensorboard_dir, exist_ok=True)
+            logger.info(f"📊 Writing TensorBoard logs to LOCAL directory: {local_tensorboard_dir}")
+            
+            # Check if Vertex AI TensorBoard is configured
+            tensorboard_gcs_path = os.environ.get('AIP_TENSORBOARD_LOG_DIR')
+            if tensorboard_gcs_path:
+                logger.info(f"📤 Will upload to Vertex AI TensorBoard: {tensorboard_gcs_path}")
+            
+            writer = SummaryWriter(log_dir=local_tensorboard_dir)
+            
+            # Run comprehensive evaluation (logs everything to TensorBoard)
+            # Use multiple runs to show progression in scalars
+            logger.info("\n🔍 Running comprehensive model evaluation (TensorBoard)...")
+            eval_results = run_comprehensive_evaluation(
+                model=pipeline,
+                X_test=X_test,
+                y_test=y_test,
+                feature_names=feature_cols,
+                writer=writer,
+                step=0,
+                num_runs=5  # Log 5 runs for progression visualization
+            )
+            
+            # Also log basic training metrics and hyperparameters to TensorBoard
+            log_training_metrics_to_tensorboard(writer, config, metrics, y_test, y_pred)
+            
+            # Flush writer to ensure all images are written before closing
+            writer.flush()
+            logger.info("✅ Flushed TensorBoard writer")
+            
+            writer.close()
+            logger.info("✅ SummaryWriter closed")
+            
+            # Also run MLflow evaluation (better image handling)
+            logger.info("\n🔍 Running comprehensive model evaluation (MLflow)...")
+            labels = sorted(df_enhanced['crop'].unique().tolist())
+            mlflow_metrics = run_comprehensive_evaluation_mlflow(
+                model=pipeline,
+                X_test=X_test,
+                y_test=y_test,
+                feature_names=feature_cols,
+                labels=labels
+            )
+            
+            # Log model to MLflow
+            mlflow.sklearn.log_model(pipeline, "model")
+            logger.info("✅ Logged model to MLflow")
+            
+            # Upload MLflow artifacts to GCS manually (since we're using local tracking)
+            try:
+                import shutil
+                from google.cloud import storage as gcs_storage
+                
+                mlflow_local_dir = f"/tmp/mlruns"
+                if os.path.exists(mlflow_local_dir):
+                    gcs_client = gcs_storage.Client()
+                    bucket = gcs_client.bucket(config['storage']['bucket'])
+                    
+                    # Upload the entire MLflow run directory
+                    for root, dirs, files in os.walk(mlflow_local_dir):
+                        for file in files:
+                            local_path = os.path.join(root, file)
+                            relative_path = os.path.relpath(local_path, mlflow_local_dir)
+                            gcs_path = f"mlflow/{relative_path}"
+                            blob = bucket.blob(gcs_path)
+                            blob.upload_from_filename(local_path)
+                    
+                    logger.info(f"✅ Uploaded MLflow artifacts to gs://{config['storage']['bucket']}/mlflow/")
+            except Exception as e:
+                logger.warning(f"⚠️  Could not upload MLflow artifacts to GCS: {e}")
+                logger.info("   MLflow artifacts are available locally in /tmp/mlruns/")
         
         # List files created locally
         logger.info(f"\n📂 Local TensorBoard files created:")

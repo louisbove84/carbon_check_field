@@ -39,7 +39,7 @@ _shared_path = os.path.join(os.path.dirname(__file__), '..', 'ml_pipeline', 'sha
 if os.path.exists(_ml_pipeline_path):
     sys.path.insert(0, _ml_pipeline_path)
     try:
-        from feature_engineering import engineer_features_from_raw, compute_elevation_quantiles
+        from feature_engineering import engineer_features_from_raw
     except ImportError as e:
         print(f"⚠️  Could not import feature_engineering: {e}")
         print("   Using fallback feature engineering...")
@@ -107,26 +107,7 @@ VERTEX_AI_ENDPOINT = (
 SENTINEL2_COLLECTION = "COPERNICUS/S2_SR_HARMONIZED"
 CONFIG_BUCKET = "carboncheck-data"
 
-# Load elevation quantiles from config (with defaults)
-def load_elevation_quantiles() -> Dict[str, float]:
-    """Load elevation quantiles from config, with defaults if not found."""
-    try:
-        client = storage.Client()
-        bucket = client.bucket(CONFIG_BUCKET)
-        blob = bucket.blob('config/config.yaml')
-        if blob.exists():
-            import yaml
-            config = yaml.safe_load(blob.download_as_text())
-            quantiles = config.get('features', {}).get('elevation_quantiles', {})
-            if quantiles:
-                return quantiles
-    except Exception as e:
-        print(f"⚠️ Could not load elevation quantiles from config: {e}")
-    
-    # Default quantiles (will be updated after first training run)
-    return {'q25': 200.0, 'q50': 500.0, 'q75': 1000.0}
-
-ELEVATION_QUANTILES = load_elevation_quantiles()
+# REMOVED: Elevation quantiles — elevation removed from feature set
 
 # CO₂ carbon credit rates ($/acre/year) - 2025 market rates
 CARBON_RATES = {
@@ -352,20 +333,21 @@ def compute_ndvi_features(polygon_coords: List[Tuple[float, float]], year: int) 
     Compute 15 NDVI features from Sentinel-2 imagery for a given polygon.
     Uses shared Earth Engine feature extraction module.
     
-    Features (in order):
-    1. ndvi_mean, ndvi_std, ndvi_min, ndvi_max
-    2. ndvi_p25, ndvi_p50, ndvi_p75
-    3. ndvi_early, ndvi_late, elevation_binned
-    4. ndvi_range, ndvi_iqr, ndvi_change
-    5. ndvi_early_ratio, ndvi_late_ratio
+           Features (in order):
+           1. ndvi_mean, ndvi_std, ndvi_min, ndvi_max
+           2. ndvi_p25, ndvi_p50, ndvi_p75
+           3. ndvi_early, ndvi_late
+           4. ndvi_range, ndvi_iqr, ndvi_change
+           5. ndvi_early_ratio, ndvi_late_ratio
+           # REMOVED: elevation_binned — elevation removed from feature set
     # REMOVED: longitude, latitude — model no longer uses geographic cheating
     
     Args:
         polygon_coords: List of (lng, lat) tuples forming the field boundary
         year: Year for analysis (e.g., 2024)
     
-    Returns:
-        List of 15 float features (removed 4 location features)
+           Returns:
+               List of 14 float features (removed 4 location + 1 elevation features)
     """
     try:
         # Ensure Earth Engine is initialized
@@ -387,7 +369,7 @@ def compute_ndvi_features(polygon_coords: List[Tuple[float, float]], year: int) 
             ndvi_p75 = raw_features['ndvi_p75']
             ndvi_early = raw_features['ndvi_early']
             ndvi_late = raw_features['ndvi_late']
-            elevation_m = raw_features['elevation_m']
+            # REMOVED: elevation_m = raw_features['elevation_m'] — elevation removed from feature set
             # REMOVED: longitude, latitude — model no longer uses geographic cheating
             # longitude = raw_features['longitude']
             # latitude = raw_features['latitude']
@@ -401,6 +383,7 @@ def compute_ndvi_features(polygon_coords: List[Tuple[float, float]], year: int) 
         
         # Use shared feature engineering (ensures consistency with training)
         # REMOVED: latitude, longitude — model no longer uses geographic cheating
+        # REMOVED: elevation_m, elevation_quantiles — elevation removed from feature set
         features = engineer_features_from_raw(
             ndvi_mean=ndvi_mean,
             ndvi_std=ndvi_std,
@@ -411,9 +394,9 @@ def compute_ndvi_features(polygon_coords: List[Tuple[float, float]], year: int) 
             ndvi_p75=ndvi_p75,
             ndvi_early=ndvi_early,
             ndvi_late=ndvi_late,
-            elevation_m=elevation_m,
+            # REMOVED: elevation_m=elevation_m — elevation removed from feature set
             # REMOVED: latitude=latitude, longitude=longitude — model no longer uses geographic cheating
-            elevation_quantiles=ELEVATION_QUANTILES
+            # REMOVED: elevation_quantiles=ELEVATION_QUANTILES — elevation removed from feature set
         )
         
         return features

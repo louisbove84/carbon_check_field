@@ -28,11 +28,11 @@ def compute_ndvi_features_ee(
         buffer_size: Buffer in meters for sampling stability
     
     Returns:
-        Dict with 10 raw features:
+        Dict with 9 raw features:
         - ndvi_mean, ndvi_std, ndvi_min, ndvi_max
         - ndvi_p25, ndvi_p50, ndvi_p75
         - ndvi_early, ndvi_late
-        - elevation_m
+        # REMOVED: elevation_m — elevation removed from feature set
         # REMOVED: longitude, latitude — model no longer uses geographic cheating
     """
     # Define growing season
@@ -96,21 +96,8 @@ def compute_ndvi_features_ee(
         )
     )
     
-    # Elevation from SRTM
-    elevation = (
-        ee.Image('USGS/SRTMGL1_003')
-        .select('elevation')
-        .reduceRegion(
-            reducer=ee.Reducer.mean(),
-            geometry=geometry,
-            scale=30,
-            maxPixels=1e9
-        )
-    )
-    
+    # REMOVED: Elevation from SRTM — elevation removed from feature set
     # REMOVED: lat/lon — model no longer uses geographic cheating
-    # Get centroid coordinates (no longer used for features, but kept for potential future use)
-    # centroid = geometry.centroid().coordinates()
     
     # Use ee.Algorithms.If to provide defaults for missing NDVI values
     # This prevents "Dictionary does not contain key" errors
@@ -126,7 +113,7 @@ def compute_ndvi_features_ee(
         'ndvi_p75': ee.Algorithms.If(ndvi_stats.contains('NDVI_p75'), ndvi_stats.get('NDVI_p75'), 0.6),
         'ndvi_early': ee.Algorithms.If(early_ndvi.contains('NDVI'), early_ndvi.get('NDVI'), default_ndvi),
         'ndvi_late': ee.Algorithms.If(late_ndvi.contains('NDVI'), late_ndvi.get('NDVI'), default_ndvi),
-        'elevation_m': ee.Algorithms.If(elevation.contains('elevation'), elevation.get('elevation'), 0.0),
+        # REMOVED: elevation_m — elevation removed from feature set
         # REMOVED: longitude, latitude — model no longer uses geographic cheating
     }
 
@@ -169,6 +156,7 @@ def compute_ndvi_features_sync(
     
     # Convert to Python values with defaults
     # REMOVED: lat/lon — model no longer uses geographic cheating
+    # REMOVED: elevation_m — elevation removed from feature set
     return {
         'ndvi_mean': features_dict['ndvi_mean'].getInfo() if features_dict['ndvi_mean'] else 0.5,
         'ndvi_std': features_dict['ndvi_std'].getInfo() if features_dict['ndvi_std'] else 0.1,
@@ -179,7 +167,7 @@ def compute_ndvi_features_sync(
         'ndvi_p75': features_dict['ndvi_p75'].getInfo() if features_dict['ndvi_p75'] else 0.6,
         'ndvi_early': features_dict['ndvi_early'].getInfo() if features_dict['ndvi_early'] else 0.5,
         'ndvi_late': features_dict['ndvi_late'].getInfo() if features_dict['ndvi_late'] else 0.5,
-        'elevation_m': features_dict['elevation_m'].getInfo() if features_dict['elevation_m'] else 0.0,
+        # REMOVED: elevation_m — elevation removed from feature set
         # REMOVED: longitude, latitude — model no longer uses geographic cheating
     }
 
