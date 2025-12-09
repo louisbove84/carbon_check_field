@@ -24,6 +24,28 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
+def _convert_figure_to_tensorboard_image(fig):
+    """
+    Convert matplotlib figure to TensorBoard-compatible image array.
+    Returns numpy array in CHW format (channels, height, width) with values in [0, 1].
+    """
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+    buf.seek(0)
+    image = Image.open(buf)
+    # Convert RGBA to RGB if needed (TensorBoard expects RGB)
+    if image.mode == 'RGBA':
+        image = image.convert('RGB')
+    image_array = np.array(image)
+    # Ensure CHW format (channels, height, width) - TensorBoard requirement
+    if len(image_array.shape) == 3:
+        image_array = np.transpose(image_array, (2, 0, 1))
+    # Normalize to [0, 1] range as float32 (required for TensorBoard display)
+    if image_array.dtype != np.float32:
+        image_array = image_array.astype(np.float32) / 255.0
+    return image_array
+
+
 def log_confusion_matrix_to_tensorboard(writer, y_true, y_pred, labels, step=0):
     """
     Log confusion matrix visualizations to TensorBoard.
@@ -49,13 +71,7 @@ def log_confusion_matrix_to_tensorboard(writer, y_true, y_pred, labels, step=0):
     plt.tight_layout()
     
     # Convert to image tensor
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
-    buf.seek(0)
-    image = Image.open(buf)
-    image_array = np.array(image)
-    if len(image_array.shape) == 3:
-        image_array = np.transpose(image_array, (2, 0, 1))
+    image_array = _convert_figure_to_tensorboard_image(fig)
     writer.add_image('confusion_matrix/counts_and_percent', image_array, step)
     plt.close(fig)
     
@@ -70,13 +86,7 @@ def log_confusion_matrix_to_tensorboard(writer, y_true, y_pred, labels, step=0):
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
     plt.tight_layout()
     
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
-    buf.seek(0)
-    image = Image.open(buf)
-    image_array = np.array(image)
-    if len(image_array.shape) == 3:
-        image_array = np.transpose(image_array, (2, 0, 1))
+    image_array = _convert_figure_to_tensorboard_image(fig)
     writer.add_image('confusion_matrix/percentage', image_array, step)
     plt.close(fig)
     
@@ -92,13 +102,7 @@ def log_confusion_matrix_to_tensorboard(writer, y_true, y_pred, labels, step=0):
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
     plt.tight_layout()
     
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
-    buf.seek(0)
-    image = Image.open(buf)
-    image_array = np.array(image)
-    if len(image_array.shape) == 3:
-        image_array = np.transpose(image_array, (2, 0, 1))
+    image_array = _convert_figure_to_tensorboard_image(fig)
     writer.add_image('confusion_matrix/normalized', image_array, step)
     plt.close(fig)
     
@@ -140,13 +144,7 @@ def log_per_crop_metrics_to_tensorboard(writer, y_true, y_pred, labels, step=0):
     ax.grid(axis='y', alpha=0.3)
     plt.tight_layout()
     
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
-    buf.seek(0)
-    image = Image.open(buf)
-    image_array = np.array(image)
-    if len(image_array.shape) == 3:
-        image_array = np.transpose(image_array, (2, 0, 1))
+    image_array = _convert_figure_to_tensorboard_image(fig)
     writer.add_image('per_crop_metrics/comparison', image_array, step)
     plt.close(fig)
     
@@ -165,13 +163,7 @@ def log_per_crop_metrics_to_tensorboard(writer, y_true, y_pred, labels, step=0):
     ax.grid(axis='x', alpha=0.3)
     plt.tight_layout()
     
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
-    buf.seek(0)
-    image = Image.open(buf)
-    image_array = np.array(image)
-    if len(image_array.shape) == 3:
-        image_array = np.transpose(image_array, (2, 0, 1))
+    image_array = _convert_figure_to_tensorboard_image(fig)
     writer.add_image('per_crop_metrics/f1_sorted', image_array, step)
     plt.close(fig)
     
@@ -190,6 +182,7 @@ def log_per_crop_metrics_to_tensorboard(writer, y_true, y_pred, labels, step=0):
 def log_feature_importance_to_tensorboard(writer, model, feature_names, step=0):
     """
     Log feature importance analysis to TensorBoard.
+    REMOVED: lat/lon features — model no longer uses geographic cheating
     """
     # Extract RandomForest classifier
     if hasattr(model, 'named_steps'):
@@ -204,10 +197,17 @@ def log_feature_importance_to_tensorboard(writer, model, feature_names, step=0):
     importances = rf_model.feature_importances_
     indices = np.argsort(importances)[::-1]
     
+    # Filter out location features (shouldn't exist, but filter just in case)
+    # REMOVED: lat/lon features — model no longer uses geographic cheating
+    location_features = {'lat_sin', 'lat_cos', 'lon_sin', 'lon_cos', 'latitude', 'longitude'}
+    filtered_indices = [i for i in indices if feature_names[i] not in location_features]
+    filtered_importances = [importances[i] for i in filtered_indices]
+    filtered_feature_names = [feature_names[i] for i in filtered_indices]
+    
     importance_df = pd.DataFrame({
-        'Feature': [feature_names[i] for i in indices],
-        'Importance': importances[indices],
-        'Rank': range(1, len(indices) + 1)
+        'Feature': filtered_feature_names,
+        'Importance': filtered_importances,
+        'Rank': range(1, len(filtered_indices) + 1)
     })
     
     # Top 20 features bar chart
@@ -225,13 +225,7 @@ def log_feature_importance_to_tensorboard(writer, model, feature_names, step=0):
     ax.grid(axis='x', alpha=0.3)
     plt.tight_layout()
     
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
-    buf.seek(0)
-    image = Image.open(buf)
-    image_array = np.array(image)
-    if len(image_array.shape) == 3:
-        image_array = np.transpose(image_array, (2, 0, 1))
+    image_array = _convert_figure_to_tensorboard_image(fig)
     writer.add_image('feature_importance/top_features', image_array, step)
     plt.close(fig)
     
@@ -254,13 +248,7 @@ def log_feature_importance_to_tensorboard(writer, model, feature_names, step=0):
     ax.axvline(x=n_90, color='orange', linestyle=':', alpha=0.5)
     plt.tight_layout()
     
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
-    buf.seek(0)
-    image = Image.open(buf)
-    image_array = np.array(image)
-    if len(image_array.shape) == 3:
-        image_array = np.transpose(image_array, (2, 0, 1))
+    image_array = _convert_figure_to_tensorboard_image(fig)
     writer.add_image('feature_importance/cumulative', image_array, step)
     plt.close(fig)
     
@@ -318,13 +306,7 @@ def log_misclassification_analysis_to_tensorboard(writer, y_true, y_pred, labels
     
     plt.tight_layout()
     
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
-    buf.seek(0)
-    image = Image.open(buf)
-    image_array = np.array(image)
-    if len(image_array.shape) == 3:
-        image_array = np.transpose(image_array, (2, 0, 1))
+    image_array = _convert_figure_to_tensorboard_image(fig)
     writer.add_image('misclassification/top_patterns', image_array, step)
     plt.close(fig)
     
@@ -385,13 +367,7 @@ def log_advanced_metrics_to_tensorboard(writer, y_true, y_pred, step=0):
     plt.xticks(rotation=15, ha='right')
     plt.tight_layout()
     
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
-    buf.seek(0)
-    image = Image.open(buf)
-    image_array = np.array(image)
-    if len(image_array.shape) == 3:
-        image_array = np.transpose(image_array, (2, 0, 1))
+    image_array = _convert_figure_to_tensorboard_image(fig)
     writer.add_image('metrics/overall', image_array, step)
     plt.close(fig)
     
@@ -459,7 +435,7 @@ def run_comprehensive_evaluation(model, X_test, y_test, feature_names, writer, s
             logger.warning(f"   Feature names: {feature_names}")
         else:
             logger.info(f"✅ Feature names verified: {len(feature_names)} features")
-            logger.info(f"   Features include: {[f for f in feature_names if 'sin' in f or 'cos' in f]}")
+            # REMOVED: lat/lon sin/cos features — model no longer uses geographic cheating
     
     # Get predictions
     y_pred = model.predict(X_test)

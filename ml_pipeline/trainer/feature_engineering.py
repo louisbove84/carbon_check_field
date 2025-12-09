@@ -96,8 +96,7 @@ def engineer_features_from_raw(
     ndvi_early: float,
     ndvi_late: float,
     elevation_m: float,
-    latitude: float,
-    longitude: float,
+    # REMOVED: latitude, longitude — model no longer uses geographic cheating
     elevation_quantiles: Dict[str, float]
 ) -> List[float]:
     """
@@ -109,7 +108,7 @@ def engineer_features_from_raw(
         elevation_quantiles: Quantiles dict from training data
     
     Returns:
-        List of 19 engineered features in exact order
+        List of 15 engineered features in exact order (removed 4 location features)
     """
     # Derived NDVI features
     ndvi_range = ndvi_max - ndvi_min
@@ -118,13 +117,14 @@ def engineer_features_from_raw(
     ndvi_early_ratio = ndvi_early / (ndvi_mean + 0.001)
     ndvi_late_ratio = ndvi_late / (ndvi_mean + 0.001)
     
-    # Encode location (sin/cos)
-    location_features = encode_location(latitude, longitude)
+    # REMOVED: Encode location (sin/cos) — model no longer uses geographic cheating
+    # location_features = encode_location(latitude, longitude)
     
     # Bin elevation (quantile-based)
     elevation_binned = bin_elevation_quantile(elevation_m, elevation_quantiles)
     
     # Return features in exact order (must match training!)
+    # REMOVED: lat_sin, lat_cos, lon_sin, lon_cos (4 features)
     features = [
         ndvi_mean,
         ndvi_std,
@@ -136,10 +136,10 @@ def engineer_features_from_raw(
         ndvi_early,
         ndvi_late,
         float(elevation_binned),  # Binned elevation
-        location_features[0],  # lat_sin
-        location_features[1],  # lat_cos
-        location_features[2],  # lon_sin
-        location_features[3],  # lon_cos
+        # REMOVED: location_features[0],  # lat_sin
+        # REMOVED: location_features[1],  # lat_cos
+        # REMOVED: location_features[2],  # lon_sin
+        # REMOVED: location_features[3],  # lon_cos
         ndvi_range,
         ndvi_iqr,
         ndvi_change,
@@ -163,11 +163,11 @@ def engineer_features_dataframe(df: pd.DataFrame, elevation_quantiles: Dict[str,
     """
     df = df.copy()
     
-    # Encode location features
-    df['lat_sin'] = df['latitude'].apply(lambda x: math.sin(math.radians(x)))
-    df['lat_cos'] = df['latitude'].apply(lambda x: math.cos(math.radians(x)))
-    df['lon_sin'] = df['longitude'].apply(lambda x: math.sin(math.radians(x)))
-    df['lon_cos'] = df['longitude'].apply(lambda x: math.cos(math.radians(x)))
+    # REMOVED: Encode location features — model no longer uses geographic cheating
+    # df['lat_sin'] = df['latitude'].apply(lambda x: math.sin(math.radians(x)))
+    # df['lat_cos'] = df['latitude'].apply(lambda x: math.cos(math.radians(x)))
+    # df['lon_sin'] = df['longitude'].apply(lambda x: math.sin(math.radians(x)))
+    # df['lon_cos'] = df['longitude'].apply(lambda x: math.cos(math.radians(x)))
     
     # Bin elevation
     df['elevation_binned'] = df['elevation_m'].apply(
@@ -182,6 +182,7 @@ def engineer_features_dataframe(df: pd.DataFrame, elevation_quantiles: Dict[str,
     df['ndvi_late_ratio'] = df['ndvi_late'] / (df['ndvi_mean'] + 0.001)
     
     # Feature column order (must match engineer_features_from_raw!)
+    # REMOVED: lat_sin, lat_cos, lon_sin, lon_cos — model no longer uses geographic cheating
     feature_cols = [
         'ndvi_mean',
         'ndvi_std',
@@ -192,11 +193,8 @@ def engineer_features_dataframe(df: pd.DataFrame, elevation_quantiles: Dict[str,
         'ndvi_p75',
         'ndvi_early',
         'ndvi_late',
-        'elevation_binned',  # Changed from elevation_m
-        'lat_sin',           # Changed from longitude
-        'lat_cos',           # Changed from latitude
-        'lon_sin',
-        'lon_cos',
+        'elevation_binned',
+        # REMOVED: 'lat_sin', 'lat_cos', 'lon_sin', 'lon_cos' — model no longer uses geographic cheating
         'ndvi_range',
         'ndvi_iqr',
         'ndvi_change',

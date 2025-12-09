@@ -349,23 +349,23 @@ def get_cdl_crop_type(polygon_coords: List[Tuple[float, float]], year: int) -> O
 
 def compute_ndvi_features(polygon_coords: List[Tuple[float, float]], year: int) -> List[float]:
     """
-    Compute 17 NDVI features from Sentinel-2 imagery for a given polygon.
+    Compute 15 NDVI features from Sentinel-2 imagery for a given polygon.
     Uses shared Earth Engine feature extraction module.
     
     Features (in order):
     1. ndvi_mean, ndvi_std, ndvi_min, ndvi_max
     2. ndvi_p25, ndvi_p50, ndvi_p75
-    3. ndvi_early, ndvi_late, elevation_m
-    4. longitude, latitude
-    5. ndvi_range, ndvi_iqr, ndvi_change
-    6. ndvi_early_ratio, ndvi_late_ratio
+    3. ndvi_early, ndvi_late, elevation_binned
+    4. ndvi_range, ndvi_iqr, ndvi_change
+    5. ndvi_early_ratio, ndvi_late_ratio
+    # REMOVED: longitude, latitude — model no longer uses geographic cheating
     
     Args:
         polygon_coords: List of (lng, lat) tuples forming the field boundary
         year: Year for analysis (e.g., 2024)
     
     Returns:
-        List of 17 float features
+        List of 15 float features (removed 4 location features)
     """
     try:
         # Ensure Earth Engine is initialized
@@ -388,8 +388,9 @@ def compute_ndvi_features(polygon_coords: List[Tuple[float, float]], year: int) 
             ndvi_early = raw_features['ndvi_early']
             ndvi_late = raw_features['ndvi_late']
             elevation_m = raw_features['elevation_m']
-            longitude = raw_features['longitude']
-            latitude = raw_features['latitude']
+            # REMOVED: longitude, latitude — model no longer uses geographic cheating
+            # longitude = raw_features['longitude']
+            # latitude = raw_features['latitude']
         else:
             # Fallback if shared module not available (shouldn't happen in production)
             print("⚠️  Shared module not available, using fallback NDVI computation")
@@ -399,6 +400,7 @@ def compute_ndvi_features(polygon_coords: List[Tuple[float, float]], year: int) 
             )
         
         # Use shared feature engineering (ensures consistency with training)
+        # REMOVED: latitude, longitude — model no longer uses geographic cheating
         features = engineer_features_from_raw(
             ndvi_mean=ndvi_mean,
             ndvi_std=ndvi_std,
@@ -410,8 +412,7 @@ def compute_ndvi_features(polygon_coords: List[Tuple[float, float]], year: int) 
             ndvi_early=ndvi_early,
             ndvi_late=ndvi_late,
             elevation_m=elevation_m,
-            latitude=latitude,
-            longitude=longitude,
+            # REMOVED: latitude=latitude, longitude=longitude — model no longer uses geographic cheating
             elevation_quantiles=ELEVATION_QUANTILES
         )
         
@@ -435,7 +436,7 @@ def predict_crop_type(features: List[float]) -> Tuple[str, float]:
     Uses predict_proba to get real confidence scores.
     
     Args:
-        features: List of 19 engineered features
+        features: List of 15 engineered features (removed 4 location features)
     
     Returns:
         Tuple of (crop_name, confidence_score) where confidence is the max probability
@@ -466,7 +467,7 @@ def predict_crop_type(features: List[float]) -> Tuple[str, float]:
         if not prediction.predictions:
             raise HTTPException(status_code=500, detail="No predictions returned")
         
-        pred = prediction.predictions[0]
+            pred = prediction.predictions[0]
         crop = None
         confidence = None  # No default - return None if not available
         
@@ -536,18 +537,18 @@ def predict_crop_type(features: List[float]) -> Tuple[str, float]:
                 crop = str(pred)
         elif isinstance(pred, str):
             # String format: "Corn"
-            crop = pred
-        else:
+                crop = pred
+            else:
             # Fallback
-            crop = str(pred)
-        
+                crop = str(pred)
+            
         # Ensure confidence is between 0 and 1 (only if we have a value)
         if confidence is not None:
             confidence = max(0.0, min(1.0, confidence))
             print(f"🔮 Prediction: {crop} (confidence: {confidence:.2%})")
         else:
             print(f"🔮 Prediction: {crop} (confidence: None - not available)")
-        
+    
         return crop, confidence
     
     except HTTPException:

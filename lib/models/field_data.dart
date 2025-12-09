@@ -23,7 +23,8 @@ class FieldData {
   /// Timestamp when field was drawn
   final DateTime createdAt;
   
-  /// 17 computed features for ML model (nullable until computed)
+  /// 15 computed features for ML model (nullable until computed)
+  /// REMOVED: lat/lon — model no longer uses geographic cheating
   List<double>? features;
 
   FieldData({
@@ -98,6 +99,7 @@ class FieldData {
   }
 
   /// Check if features have been computed
-  bool get hasFeatures => features != null && features!.length == 17;
+  /// REMOVED: lat/lon — model no longer uses geographic cheating (was 17, now 15)
+  bool get hasFeatures => features != null && features!.length == 15;
 }
 

@@ -255,8 +255,8 @@ def trigger_training_job():
             staging_bucket=f'gs://{vertex_bucket}/staging'
         )
         
-        # Get TensorBoard instance resource name
-        tensorboard_id = '8764605208211750912'
+        # Get TensorBoard instance resource name from config
+        tensorboard_id = config.get('tensorboard', {}).get('instance_id', '8764605208211750912')
         tensorboard_name = f'projects/{project_id}/locations/{region}/tensorboards/{tensorboard_id}'
         
         # Service account for training job
@@ -310,18 +310,19 @@ def get_training_metrics(job, vertex_bucket):
         dict with training metrics
     """
     try:
-        # The trainer saves metrics.json to the carboncheck-data bucket
-        # in the models/crop_classifier_latest/ folder
+        # The trainer saves metrics.json to the configured bucket and path
         client = storage.Client()
         
         # Read from the standard model bucket (where trainer saves final artifacts)
-        model_bucket = client.bucket('carboncheck-data')
-        metrics_blob = model_bucket.blob('models/crop_classifier_latest/metrics.json')
+        bucket_name = config['storage']['bucket']
+        metrics_path = config['model']['metrics_path']
+        model_bucket = client.bucket(bucket_name)
+        metrics_blob = model_bucket.blob(metrics_path)
         
         if metrics_blob.exists():
             content = metrics_blob.download_as_text()
             metrics = json.loads(content)
-            logger.info(f"   ✅ Loaded metrics from carboncheck-data bucket")
+            logger.info(f"   ✅ Loaded metrics from {bucket_name} bucket")
             logger.info(f"   Accuracy: {metrics.get('test_accuracy', 0):.2%}")
             logger.info(f"   Training samples: {metrics.get('n_train_samples', 0)}")
             return metrics
@@ -453,10 +454,23 @@ def evaluate_and_deploy(training_result):
             logger.info("")
         
         # Check quality gates
-        logger.info(f"   Minimum required: {gates['absolute_min_accuracy']:.0%}")
+        force_deploy = gates.get('force_deploy', False)
         
-        if challenger_accuracy >= gates['absolute_min_accuracy']:
-            logger.info("   ✅ Quality gates passed")
+        if force_deploy:
+            logger.warning("   ⚠️  FORCE DEPLOY enabled - bypassing quality gates")
+            logger.warning(f"   Challenger accuracy: {challenger_accuracy:.2%}")
+            logger.warning(f"   Minimum required: {gates['absolute_min_accuracy']:.0%}")
+            logger.warning("   Deploying anyway due to force_deploy=true in config")
+        else:
+            logger.info(f"   Minimum required: {gates['absolute_min_accuracy']:.0%}")
+        
+        should_deploy = force_deploy or challenger_accuracy >= gates['absolute_min_accuracy']
+        
+        if should_deploy:
+            if not force_deploy:
+                logger.info("   ✅ Quality gates passed")
+            else:
+                logger.info("   ✅ Deploying (force_deploy enabled)")
             
             # Deploy to Vertex AI endpoint with evaluation metrics
             project_id = config['project']['id']
@@ -470,7 +484,8 @@ def evaluate_and_deploy(training_result):
                 'deployed': True,
                 'accuracy': challenger_accuracy,
                 'champion_accuracy': champion_metrics.get('test_accuracy', 0) if champion_metrics else None,
-                'improvement': improvement if champion_metrics else None
+                'improvement': improvement if champion_metrics else None,
+                'force_deployed': force_deploy
             }
         else:
             logger.warning("   ❌ Quality gates failed")
@@ -496,12 +511,14 @@ def deploy_model_to_endpoint(project_id, region, bucket_name, training_metrics=N
     
     model_name = config['model']['name']
     endpoint_name = config['model']['endpoint_name']
+    artifact_path = config['model']['artifact_path']
+    serving_image = config['model']['serving_container_image']
     
     # Upload model
     model = aiplatform.Model.upload(
         display_name=model_name,
-        artifact_uri=f'gs://{bucket_name}/models/crop_classifier_latest',
-        serving_container_image_uri='us-docker.pkg.dev/vertex-ai/prediction/sklearn-cpu.1-3:latest'
+        artifact_uri=f'gs://{bucket_name}/{artifact_path}',
+        serving_container_image_uri=serving_image
     )
     
     logger.info(f"   Model uploaded: {model.resource_name}")

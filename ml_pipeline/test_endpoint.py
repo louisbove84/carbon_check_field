@@ -30,16 +30,18 @@ print()
 
 # Test case 1: Sample from training data (Corn)
 # Features: [ndvi_mean, ndvi_std, ndvi_min, ndvi_max, ndvi_p25, ndvi_p50, ndvi_p75,
-#            ndvi_early, ndvi_late, elevation_m, longitude, latitude,
+#            ndvi_early, ndvi_late, elevation_binned,
 #            ndvi_range, ndvi_iqr, ndvi_change, ndvi_early_ratio, ndvi_late_ratio]
+# REMOVED: longitude, latitude — model no longer uses geographic cheating
 test_cases = [
     {
         "name": "Corn (sample)",
         "features": [
             0.65, 0.12, 0.45, 0.85, 0.58, 0.65, 0.72,  # NDVI stats
             0.55, 0.70,  # early, late
-            250.0, -98.5, 40.0,  # elevation, longitude, latitude
-            0.40, 0.14, 0.15, 0.85, 1.08  # engineered features
+            1,  # elevation_binned (0-3, quantile-based)
+            # REMOVED: -98.5, 40.0 (longitude, latitude) — model no longer uses geographic cheating
+            0.40, 0.14, 0.15, 0.85, 1.08  # engineered features (range, iqr, change, ratios)
         ]
     },
     {
@@ -47,7 +49,8 @@ test_cases = [
         "features": [
             0.58, 0.10, 0.42, 0.75, 0.52, 0.58, 0.65,
             0.50, 0.65,
-            200.0, -99.0, 41.0,
+            1,  # elevation_binned
+            # REMOVED: -99.0, 41.0 (longitude, latitude) — model no longer uses geographic cheating
             0.33, 0.13, 0.15, 0.86, 1.10
         ]
     },
@@ -56,7 +59,8 @@ test_cases = [
         "features": [
             0.55, 0.08, 0.40, 0.70, 0.50, 0.55, 0.60,
             0.48, 0.62,
-            180.0, -98.0, 39.5,
+            0,  # elevation_binned
+            # REMOVED: -98.0, 39.5 (longitude, latitude) — model no longer uses geographic cheating
             0.30, 0.10, 0.14, 0.87, 1.13
         ]
     }
@@ -123,7 +127,8 @@ try:
         ndvi_mean, ndvi_std, ndvi_min, ndvi_max,
         ndvi_p25, ndvi_p50, ndvi_p75,
         ndvi_early, ndvi_late,
-        elevation_m, longitude, latitude
+        elevation_m
+        -- REMOVED: longitude, latitude — model no longer uses geographic cheating
     FROM `ml-pipeline-477612.crop_ml.training_features`
     WHERE crop IN ('Corn', 'Soybeans', 'Winter_Wheat')
     LIMIT 3
@@ -144,12 +149,17 @@ try:
             ndvi_early_ratio = row['ndvi_early'] / (row['ndvi_mean'] + 1e-6)
             ndvi_late_ratio = row['ndvi_late'] / (row['ndvi_mean'] + 1e-6)
             
-            # Build feature vector (17 features)
+            # Bin elevation (simplified - using quantile 1 as default for testing)
+            elevation_binned = 1  # Default bin for testing (would normally use quantiles)
+            
+            # Build feature vector (15 features - removed 4 location features)
+            # REMOVED: longitude, latitude — model no longer uses geographic cheating
             features = [
                 row['ndvi_mean'], row['ndvi_std'], row['ndvi_min'], row['ndvi_max'],
                 row['ndvi_p25'], row['ndvi_p50'], row['ndvi_p75'],
                 row['ndvi_early'], row['ndvi_late'],
-                row['elevation_m'], row['longitude'], row['latitude'],
+                float(elevation_binned),  # elevation_binned (0-3)
+                # REMOVED: row['longitude'], row['latitude'] — model no longer uses geographic cheating
                 ndvi_range, ndvi_iqr, ndvi_change, ndvi_early_ratio, ndvi_late_ratio
             ]
             

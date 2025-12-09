@@ -28,12 +28,12 @@ def compute_ndvi_features_ee(
         buffer_size: Buffer in meters for sampling stability
     
     Returns:
-        Dict with 12 raw features:
+        Dict with 10 raw features:
         - ndvi_mean, ndvi_std, ndvi_min, ndvi_max
         - ndvi_p25, ndvi_p50, ndvi_p75
         - ndvi_early, ndvi_late
         - elevation_m
-        - longitude, latitude
+        # REMOVED: longitude, latitude — model no longer uses geographic cheating
     """
     # Define growing season
     start_date = f'{year}-04-15'
@@ -108,8 +108,9 @@ def compute_ndvi_features_ee(
         )
     )
     
-    # Get centroid coordinates
-    centroid = geometry.centroid().coordinates()
+    # REMOVED: lat/lon — model no longer uses geographic cheating
+    # Get centroid coordinates (no longer used for features, but kept for potential future use)
+    # centroid = geometry.centroid().coordinates()
     
     # Use ee.Algorithms.If to provide defaults for missing NDVI values
     # This prevents "Dictionary does not contain key" errors
@@ -126,8 +127,7 @@ def compute_ndvi_features_ee(
         'ndvi_early': ee.Algorithms.If(early_ndvi.contains('NDVI'), early_ndvi.get('NDVI'), default_ndvi),
         'ndvi_late': ee.Algorithms.If(late_ndvi.contains('NDVI'), late_ndvi.get('NDVI'), default_ndvi),
         'elevation_m': ee.Algorithms.If(elevation.contains('elevation'), elevation.get('elevation'), 0.0),
-        'longitude': centroid.get(0),
-        'latitude': centroid.get(1)
+        # REMOVED: longitude, latitude — model no longer uses geographic cheating
     }
 
 
@@ -168,6 +168,7 @@ def compute_ndvi_features_sync(
     features_dict = compute_ndvi_features_ee(geometry, year)
     
     # Convert to Python values with defaults
+    # REMOVED: lat/lon — model no longer uses geographic cheating
     return {
         'ndvi_mean': features_dict['ndvi_mean'].getInfo() if features_dict['ndvi_mean'] else 0.5,
         'ndvi_std': features_dict['ndvi_std'].getInfo() if features_dict['ndvi_std'] else 0.1,
@@ -179,7 +180,6 @@ def compute_ndvi_features_sync(
         'ndvi_early': features_dict['ndvi_early'].getInfo() if features_dict['ndvi_early'] else 0.5,
         'ndvi_late': features_dict['ndvi_late'].getInfo() if features_dict['ndvi_late'] else 0.5,
         'elevation_m': features_dict['elevation_m'].getInfo() if features_dict['elevation_m'] else 0.0,
-        'longitude': features_dict['longitude'].getInfo() if features_dict['longitude'] else 0.0,
-        'latitude': features_dict['latitude'].getInfo() if features_dict['latitude'] else 0.0,
+        # REMOVED: longitude, latitude — model no longer uses geographic cheating
     }
 

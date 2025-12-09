@@ -189,7 +189,7 @@ def export_to_bigquery(feature_collection: ee.FeatureCollection,
             'ndvi_mean', 'ndvi_std', 'ndvi_min', 'ndvi_max',
             'ndvi_p25', 'ndvi_p50', 'ndvi_p75',
             'ndvi_early', 'ndvi_late', 'elevation_m',
-            'longitude', 'latitude'
+            # REMOVED: 'longitude', 'latitude' — model no longer uses geographic cheating
         ]
     )
     

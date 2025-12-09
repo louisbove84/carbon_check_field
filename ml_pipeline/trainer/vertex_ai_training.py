@@ -104,11 +104,12 @@ def engineer_features(df, config):
                 config_dict['features'] = {}
             config_dict['features']['elevation_quantiles'] = elevation_quantiles
             # Update base_columns to reflect new feature structure
+            # REMOVED: lat_sin, lat_cos, lon_sin, lon_cos — model no longer uses geographic cheating
             config_dict['features']['base_columns'] = [
                 'ndvi_mean', 'ndvi_std', 'ndvi_min', 'ndvi_max',
                 'ndvi_p25', 'ndvi_p50', 'ndvi_p75', 'ndvi_early', 'ndvi_late',
                 'elevation_binned',  # Changed from elevation_m
-                'lat_sin', 'lat_cos', 'lon_sin', 'lon_cos'  # Changed from longitude, latitude
+                # REMOVED: 'lat_sin', 'lat_cos', 'lon_sin', 'lon_cos' — model no longer uses geographic cheating
             ]
             # Save updated config
             blob.upload_from_string(yaml.dump(config_dict, default_flow_style=False))
