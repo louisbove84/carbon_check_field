@@ -363,9 +363,10 @@ if __name__ == '__main__':
             logger.info(f"✅ MLflow tracking URI: {mlflow_tracking_uri}")
             logger.info(f"✅ MLflow artifacts will be stored in: {mlflow_artifact_uri}")
             # Log hyperparameters
+            hyperparams = config['model'].get('hyperparameters', {})
             mlflow.log_params({
-                'n_estimators': config['model']['n_estimators'],
-                'max_depth': config['model']['max_depth'],
+                'n_estimators': hyperparams.get('n_estimators', 100),
+                'max_depth': hyperparams.get('max_depth', 10),
                 'n_features': len(feature_cols),
                 'n_train_samples': len(df_enhanced),
                 'n_test_samples': len(X_test)
