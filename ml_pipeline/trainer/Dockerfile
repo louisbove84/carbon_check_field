@@ -17,6 +17,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY vertex_ai_training.py .
 COPY feature_engineering.py .
 COPY tensorboard_utils.py .
+COPY mlflow_utils.py .
+COPY visualization_utils.py .
 
 # Vertex AI will set AIP_MODEL_DIR environment variable
 ENV PYTHONUNBUFFERED=1
