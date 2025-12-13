@@ -1,7 +1,6 @@
 """
 Shared visualization utilities for model evaluation.
-These functions generate matplotlib figures that can be logged to either TensorBoard or MLflow.
-This ensures consistency between both logging systems.
+These functions generate matplotlib figures that can be logged to TensorBoard.
 """
 
 import numpy as np
@@ -262,4 +261,64 @@ def create_advanced_metrics_figure(y_true, y_pred, labels):
     }
     
     return fig, metrics_dict
+
+
+def create_misclassification_analysis_figure(y_true, y_pred, labels):
+    """
+    Create misclassification analysis visualization.
+    
+    Args:
+        y_true: True labels
+        y_pred: Predicted labels
+        labels: List of class labels
+    
+    Returns:
+        dict of matplotlib figures and misclassification DataFrame
+    """
+    cm = confusion_matrix(y_true, y_pred, labels=labels)
+    
+    misclass_pairs = []
+    for i in range(len(labels)):
+        for j in range(len(labels)):
+            if i != j and cm[i, j] > 0:
+                misclass_pairs.append({
+                    'True': labels[i],
+                    'Predicted': labels[j],
+                    'Count': int(cm[i, j]),
+                    'Percentage': float(cm[i, j] / cm[i].sum() * 100)
+                })
+    
+    misclass_df = pd.DataFrame(misclass_pairs).sort_values('Count', ascending=False)
+    
+    if len(misclass_df) == 0:
+        # No misclassifications
+        return {}, misclass_df
+    
+    figures = {}
+    
+    # Top 10 misclassification patterns
+    top_n = min(10, len(misclass_df))
+    top_misclass = misclass_df.head(top_n)
+    
+    fig, ax = plt.subplots(figsize=(12, 8))
+    labels_text = [f"{row['True']} → {row['Predicted']}" for _, row in top_misclass.iterrows()]
+    colors = plt.cm.Reds(np.linspace(0.4, 0.9, top_n))
+    bars = ax.barh(range(top_n), top_misclass['Count'], color=colors, alpha=0.8)
+    
+    ax.set_yticks(range(top_n))
+    ax.set_yticklabels(labels_text)
+    ax.set_xlabel('Number of Misclassifications', fontsize=12)
+    ax.set_title(f'Top {top_n} Misclassification Patterns', fontsize=14, fontweight='bold')
+    ax.invert_yaxis()
+    ax.grid(axis='x', alpha=0.3)
+    
+    for i, (_, row) in enumerate(top_misclass.iterrows()):
+        ax.text(row['Count'] + max(top_misclass['Count'])*0.02, i, 
+               f"{row['Percentage']:.1f}%", 
+               va='center', fontweight='bold')
+    
+    plt.tight_layout()
+    figures['top_patterns'] = fig
+    
+    return figures, misclass_df
 

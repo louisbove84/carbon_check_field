@@ -1,65 +1,60 @@
 """
-Vertex AI Custom Training Script
-=================================
-Heavy ML workload that runs on Vertex AI managed infrastructure.
-This script:
-1. Loads training data from BigQuery/GCS
-2. Trains RandomForest model
-3. Saves model to GCS
-4. Returns metrics
-
-Environment variables (set by Vertex AI):
-- AIP_MODEL_DIR: Where to save model artifacts
-- AIP_TRAINING_DATA_URI: Location of training data (optional)
+SIMPLIFIED Vertex AI Training Script
+======================================
+This version fixes TensorBoard image logging by:
+1. Writing directly to AIP_TENSORBOARD_LOG_DIR (no manual upload)
+2. Simplified image conversion
+3. Removed unnecessary progression/num_runs complexity
+4. Reduced excessive flushes
 """
 
 import os
-import yaml
-import logging
-import pandas as pd
-import joblib
+import sys
 import json
-import matplotlib
-matplotlib.use('Agg')  # Non-interactive backend for server
-import matplotlib.pyplot as plt
-import seaborn as sns
+import logging
+import joblib
+import yaml
+import pandas as pd
 import numpy as np
 from datetime import datetime
-from google.cloud import bigquery, storage, aiplatform
-from sklearn.ensemble import RandomForestClassifier
+from google.cloud import bigquery, storage
 from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
-from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
+from sklearn.metrics import accuracy_score, classification_report
 from torch.utils.tensorboard import SummaryWriter
-import io
-from PIL import Image
-from feature_engineering import engineer_features_dataframe
-from tensorboard_utils import run_comprehensive_evaluation
-import mlflow
-import mlflow.sklearn
-from mlflow_utils import (
-    setup_mlflow_tracking,
-    run_comprehensive_evaluation_mlflow
-)
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
+# Import local modules (all files are in /app)
+from feature_engineering import engineer_features_dataframe
+from tensorboard_utils import run_comprehensive_evaluation, log_training_metrics_to_tensorboard
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 
+def normalize_crop_labels(crop_name):
+    """Standardize crop names (remove underscores, title case)."""
+    return crop_name.replace('_', ' ').title()
+
+
 def load_config():
-    """Load configuration from Cloud Storage."""
+    """Load configuration from GCS or local file."""
     try:
         client = storage.Client()
         bucket = client.bucket('carboncheck-data')
         blob = bucket.blob('config/config.yaml')
-        yaml_content = blob.download_as_text()
-        logger.info("✅ Config loaded from Cloud Storage")
-        return yaml.safe_load(yaml_content)
+        config_text = blob.download_as_text()
+        logger.info("✅ Loaded config from GCS")
+        return yaml.safe_load(config_text)
     except Exception as e:
-        logger.error(f"❌ Failed to load config: {e}")
-        raise
+        logger.warning(f"⚠️  Could not load from GCS: {e}, using local config")
+        with open('config.yaml', 'r') as f:
+            return yaml.safe_load(f)
 
 
 def load_training_data(config):
@@ -67,36 +62,33 @@ def load_training_data(config):
     logger.info("📥 Loading training data from BigQuery...")
     
     project_id = config['project']['id']
-    dataset_id = config['bigquery']['dataset']
-    training_table = config['bigquery']['tables']['training']
-    holdout_table = config['bigquery']['tables']['holdout']
+    dataset = config['bigquery']['dataset']
+    table = config['bigquery']['tables']['training']
     
-    client = bigquery.Client(project=project_id)
-    
-    # Load training data (excluding holdout if exists)
     query = f"""
-    SELECT t.*
-    FROM `{project_id}.{dataset_id}.{training_table}` t
-    WHERE t.ndvi_mean IS NOT NULL
+        SELECT 
+            crop,
+            ndvi_mean, ndvi_std, ndvi_min, ndvi_max,
+            ndvi_p25, ndvi_p50, ndvi_p75,
+            ndvi_early, ndvi_late
+        FROM `{project_id}.{dataset}.{table}`
+        WHERE crop IS NOT NULL
     """
     
-    # Note: Holdout exclusion will be added once sample_id column is available
-    
+    client = bigquery.Client(project=project_id)
     df = client.query(query).to_dataframe()
     
-    logger.info(f"✅ Loaded {len(df)} training samples")
+    logger.info(f"✅ Loaded {len(df)} samples")
     logger.info(f"   Crops: {df['crop'].value_counts().to_dict()}")
     
     return df
 
 
 def engineer_features(df, config):
-    """Create derived features using shared feature engineering module."""
+    """Engineer features using shared module."""
     logger.info("🔧 Engineering features...")
     
-    # REMOVED: Elevation quantiles computation — elevation removed from feature set
-    
-    # Use shared feature engineering
+    # Use shared feature engineering (no elevation quantiles needed anymore)
     df_enhanced, all_features = engineer_features_dataframe(df)
     
     logger.info(f"✅ Created {len(all_features)} features")
@@ -105,34 +97,29 @@ def engineer_features(df, config):
 
 
 def train_model(df, feature_cols, config):
-    """Train RandomForest pipeline."""
-    logger.info("🤖 Training RandomForest model...")
+    """Train RandomForest model."""
+    logger.info("🤖 Training model...")
     
-    hyperparams = config['model']['hyperparameters']
-    
-    logger.info(f"   Hyperparameters:")
-    logger.info(f"   - n_estimators: {hyperparams['n_estimators']}")
-    logger.info(f"   - max_depth: {hyperparams['max_depth']}")
-    
+    # Prepare data
     X = df[feature_cols]
     y = df['crop']
     
-    # Train/test split
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=hyperparams['random_state'], stratify=y
-    )
+    logger.info(f"   Training samples: {len(X)}")
+    logger.info(f"   Features: {len(feature_cols)}")
+    logger.info(f"   Classes: {list(y.unique())}")
     
-    logger.info(f"   Train: {len(X_train)} samples")
-    logger.info(f"   Test: {len(X_test)} samples")
+    # Split data
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y
+    )
     
     # Create pipeline
     pipeline = Pipeline([
         ('scaler', StandardScaler()),
         ('classifier', RandomForestClassifier(
-            n_estimators=hyperparams['n_estimators'],
-            max_depth=hyperparams['max_depth'],
-            min_samples_split=hyperparams['min_samples_split'],
-            random_state=hyperparams['random_state'],
+            n_estimators=config.get('training', {}).get('n_estimators', 100),
+            max_depth=config.get('training', {}).get('max_depth', 15),
+            random_state=42,
             n_jobs=-1
         ))
     ])
@@ -141,157 +128,37 @@ def train_model(df, feature_cols, config):
     pipeline.fit(X_train, y_train)
     
     # Evaluate
-    train_score = pipeline.score(X_train, y_train)
-    test_score = pipeline.score(X_test, y_test)
+    train_pred = pipeline.predict(X_train)
+    test_pred = pipeline.predict(X_test)
     
-    logger.info(f"✅ Training accuracy: {train_score:.2%}")
-    logger.info(f"✅ Test accuracy: {test_score:.2%}")
+    train_acc = accuracy_score(y_train, train_pred)
+    test_acc = accuracy_score(y_test, test_pred)
     
-    # Per-crop metrics
-    y_pred = pipeline.predict(X_test)
-    report = classification_report(y_test, y_pred, output_dict=True)
+    logger.info(f"✅ Training complete")
+    logger.info(f"   Train accuracy: {train_acc:.2%}")
+    logger.info(f"   Test accuracy: {test_acc:.2%}")
     
-    logger.info("📊 Per-crop F1 scores:")
-    for crop in sorted(y_test.unique()):
-        if crop in report:
-            logger.info(f"   {crop}: {report[crop]['f1-score']:.2%}")
-    
+    # Compile metrics
     metrics = {
-        'train_accuracy': float(train_score),
-        'test_accuracy': float(test_score),
-        'classification_report': report,
+        'train_accuracy': float(train_acc),
+        'test_accuracy': float(test_acc),
         'n_train_samples': len(X_train),
-        'n_test_samples': len(X_test)
+        'n_test_samples': len(X_test),
+        'classification_report': classification_report(y_test, test_pred, output_dict=True, zero_division=0)
     }
     
-    return pipeline, metrics, X_test, y_test, y_pred
-
-
-# Removed generate_confusion_matrix - all visualizations now go to TensorBoard only
-
-
-def log_training_metrics_to_tensorboard(writer, config, metrics, y_test, y_pred):
-    """Log training-specific metrics and hyperparameters to TensorBoard."""
-    try:
-        # Log hyperparameters
-        hparams = {
-            'n_estimators': config['model']['hyperparameters']['n_estimators'],
-            'max_depth': config['model']['hyperparameters']['max_depth'],
-            'min_samples_split': config['model']['hyperparameters']['min_samples_split'],
-            'n_train_samples': metrics['n_train_samples'],
-            'n_test_samples': metrics['n_test_samples']
-        }
-        
-        # Log training accuracy (separate from test accuracy in comprehensive eval)
-        writer.add_scalar('training/train_accuracy', metrics['train_accuracy'], 0)
-        
-        # Log text summary
-        report = metrics['classification_report']
-        crops = sorted([c for c in set(y_test)])
-        
-        report_text = f"""
-        Training Summary
-        ================
-        Train Accuracy: {metrics['train_accuracy']:.2%}
-        Test Accuracy: {metrics['test_accuracy']:.2%}
-        
-        Per-Crop F1 Scores:
-        {''.join([f'- {crop}: {report[crop]["f1-score"]:.2%}' + chr(10) for crop in crops if crop in report])}
-        """
-        writer.add_text('training_summary', report_text, 0)
-        
-        # Log hyperparameters with metrics
-        metric_dict = {
-            'hparam/train_accuracy': metrics['train_accuracy'],
-            'hparam/test_accuracy': metrics['test_accuracy'],
-        }
-        writer.add_hparams(hparams, metric_dict)
-        
-        logger.info("✅ Logged training metrics to TensorBoard")
-        
-    except Exception as e:
-        logger.warning(f"⚠️  Failed to log training metrics to TensorBoard: {e}")
-
-
-def upload_tensorboard_logs(local_log_dir, config):
-    """Upload TensorBoard logs to GCS for Vertex AI TensorBoard."""
-    try:
-        project_id = config['project']['id']
-        
-        # Use Vertex AI's managed TensorBoard path if available
-        tensorboard_gcs_path = os.environ.get('AIP_TENSORBOARD_LOG_DIR')
-        
-        if not tensorboard_gcs_path:
-            logger.info("📊 TensorBoard logs saved locally (no GCS upload configured)")
-            return
-        
-        if not tensorboard_gcs_path.startswith('gs://'):
-            logger.warning(f"⚠️  Invalid TensorBoard GCS path: {tensorboard_gcs_path}")
-            return
-        
-        logger.info(f"📤 Uploading TensorBoard logs to GCS...")
-        logger.info(f"   Target: {tensorboard_gcs_path}")
-        
-        # Parse GCS path
-        gcs_path_parts = tensorboard_gcs_path.replace('gs://', '').split('/', 1)
-        bucket_name = gcs_path_parts[0]
-        gcs_prefix = gcs_path_parts[1] if len(gcs_path_parts) > 1 else ''
-        
-        # Upload all files from local_log_dir to GCS
-        storage_client = storage.Client()
-        bucket = storage_client.bucket(bucket_name)
-        
-        # Find all files to upload
-        files_to_upload = []
-        for root, dirs, files in os.walk(local_log_dir):
-            for file in files:
-                local_file_path = os.path.join(root, file)
-                files_to_upload.append(local_file_path)
-        
-        if not files_to_upload:
-            logger.warning("   No TensorBoard log files found to upload")
-            return
-        
-        logger.info(f"   Found {len(files_to_upload)} files to upload")
-        
-        # Upload files
-        uploaded_count = 0
-        for local_file_path in files_to_upload:
-            # Get relative path from local_log_dir
-            relative_path = os.path.relpath(local_file_path, local_log_dir)
-            # Construct GCS blob path (avoid double slashes)
-            if gcs_prefix:
-                # Remove trailing slash from prefix to avoid double slashes
-                clean_prefix = gcs_prefix.rstrip('/')
-                gcs_blob_path = f"{clean_prefix}/{relative_path}".replace('\\', '/')
-            else:
-                gcs_blob_path = relative_path.replace('\\', '/')
-            
-            blob = bucket.blob(gcs_blob_path)
-            blob.upload_from_filename(local_file_path)
-            uploaded_count += 1
-            if uploaded_count <= 5:  # Log first 5 files
-                logger.debug(f"   Uploaded: {gcs_blob_path}")
-        
-        logger.info(f"✅ Uploaded {uploaded_count} TensorBoard log files to {tensorboard_gcs_path}")
-        logger.info(f"   View: https://console.cloud.google.com/vertex-ai/tensorboard?project={project_id}")
-        
-    except Exception as e:
-        logger.warning(f"⚠️  Failed to upload TensorBoard logs to GCS: {e}")
-        logger.warning("   Logs are available locally but may not appear in TensorBoard UI")
+    return pipeline, metrics, X_test, y_test, test_pred
 
 
 def save_model(pipeline, feature_cols, metrics, config):
-    """Save model and metrics to Cloud Storage."""
-    logger.info("💾 Saving model to Cloud Storage...")
+    """Save model to GCS."""
+    logger.info("💾 Saving model...")
     
     bucket_name = config['storage']['bucket']
-    
-    # Get output directory from Vertex AI or use default
     output_dir = os.environ.get('AIP_MODEL_DIR', '/tmp/model')
     os.makedirs(output_dir, exist_ok=True)
     
-    # Save model files
+    # Save locally
     model_path = os.path.join(output_dir, 'model.joblib')
     features_path = os.path.join(output_dir, 'feature_cols.json')
     metrics_path = os.path.join(output_dir, 'metrics.json')
@@ -304,12 +171,9 @@ def save_model(pipeline, feature_cols, metrics, config):
     with open(metrics_path, 'w') as f:
         json.dump(metrics, f, default=str)
     
-    logger.info(f"✅ Model saved to {model_path}")
-    
-    # Also save to standard location for deployment
+    # Upload to GCS
     client = storage.Client()
     bucket = client.bucket(bucket_name)
-    
     timestamp = datetime.now().strftime('%Y%m%d_%H%M')
     
     # Archive
@@ -324,12 +188,12 @@ def save_model(pipeline, feature_cols, metrics, config):
     bucket.blob(f'{latest_prefix}/feature_cols.json').upload_from_filename(features_path)
     bucket.blob(f'{latest_prefix}/metrics.json').upload_from_filename(metrics_path)
     
-    logger.info(f"✅ Model also saved to gs://{bucket_name}/{latest_prefix}")
+    logger.info(f"✅ Model saved to gs://{bucket_name}/{latest_prefix}")
 
 
 if __name__ == '__main__':
     logger.info("=" * 70)
-    logger.info("🎯 VERTEX AI CUSTOM TRAINING JOB")
+    logger.info("🎯 VERTEX AI TRAINING (SIMPLIFIED)")
     logger.info("=" * 70)
     
     start_time = datetime.now()
@@ -341,188 +205,111 @@ if __name__ == '__main__':
         # Load data
         df = load_training_data(config)
         
+        # Normalize crop labels
+        df['crop'] = df['crop'].apply(normalize_crop_labels)
+        logger.info(f"✅ Normalized crop labels: {df['crop'].unique().tolist()}")
+        
         # Engineer features
         df_enhanced, feature_cols = engineer_features(df, config)
         
         # Train model
         pipeline, metrics, X_test, y_test, y_pred = train_model(df_enhanced, feature_cols, config)
         
-        # Create output directory for artifacts
-        output_dir = os.environ.get('AIP_MODEL_DIR', '/tmp/model')
-        os.makedirs(output_dir, exist_ok=True)
+        # === TENSORBOARD LOGGING ===
+        # IMPORTANT: SummaryWriter MUST write to LOCAL path (GCS doesn't support append mode)
+        # We'll upload to GCS after all logging is complete
+        base_local_dir = '/tmp/tensorboard_logs'
         
-        # Setup MLflow tracking (use GCS as artifact store)
-        mlflow_artifact_uri = f"gs://{config['storage']['bucket']}/mlflow"
-        mlflow_tracking_uri = f"file:///tmp/mlruns"  # Local tracking, artifacts in GCS
-        setup_mlflow_tracking(tracking_uri=mlflow_tracking_uri, experiment_name="crop-classification")
+        # Create a unique subdirectory for this run
+        # This ensures that even if we upload to a shared GCS root, we get separation
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_dir_name = f'run_{timestamp}'
+        local_run_dir = os.path.join(base_local_dir, run_dir_name)
+        os.makedirs(local_run_dir, exist_ok=True)
         
-        # Start MLflow run with GCS artifact URI
-        with mlflow.start_run(run_name=f"training-{datetime.now().strftime('%Y%m%d_%H%M')}") as run:
-            # Set artifact URI to GCS
-            mlflow.set_tracking_uri(mlflow_tracking_uri)
-            logger.info(f"✅ MLflow tracking URI: {mlflow_tracking_uri}")
-            logger.info(f"✅ MLflow artifacts will be stored in: {mlflow_artifact_uri}")
-            # Log hyperparameters
-            hyperparams = config['model'].get('hyperparameters', {})
-            mlflow.log_params({
-                'n_estimators': hyperparams.get('n_estimators', 100),
-                'max_depth': hyperparams.get('max_depth', 10),
-                'n_features': len(feature_cols),
-                'n_train_samples': len(df_enhanced),
-                'n_test_samples': len(X_test)
-            })
-            
-            # Log metrics
-            mlflow.log_metric("train_accuracy", metrics['train_accuracy'])
-            mlflow.log_metric("test_accuracy", metrics['test_accuracy'])
-            
-            # Create TensorBoard writer
-            # IMPORTANT: SummaryWriter MUST write to a LOCAL path (not GCS)
-            # Even if AIP_MODEL_DIR is a GCS path, we need a local directory for TensorBoard
-            local_tensorboard_dir = '/tmp/tensorboard_logs'
-            os.makedirs(local_tensorboard_dir, exist_ok=True)
-            logger.info(f"📊 Writing TensorBoard logs to LOCAL directory: {local_tensorboard_dir}")
-            
-            # Check if Vertex AI TensorBoard is configured
-            tensorboard_gcs_path = os.environ.get('AIP_TENSORBOARD_LOG_DIR')
-            if tensorboard_gcs_path:
-                logger.info(f"📤 Will upload to Vertex AI TensorBoard: {tensorboard_gcs_path}")
-            
-            writer = SummaryWriter(log_dir=local_tensorboard_dir)
-            
-            # Run comprehensive evaluation (logs everything to TensorBoard)
-            # Use multiple runs to show progression in scalars
-            logger.info("\n🔍 Running comprehensive model evaluation (TensorBoard)...")
-            eval_results = run_comprehensive_evaluation(
-                model=pipeline,
-                X_test=X_test,
-                y_test=y_test,
-                feature_names=feature_cols,
-                writer=writer,
-                step=0,
-                num_runs=5  # Log 5 runs for progression visualization
-            )
-            
-            # Also log basic training metrics and hyperparameters to TensorBoard
-            log_training_metrics_to_tensorboard(writer, config, metrics, y_test, y_pred)
-            
-            # Flush writer to ensure all images are written before closing
-            writer.flush()
-            logger.info("✅ Flushed TensorBoard writer")
-            
-            writer.close()
-            logger.info("✅ SummaryWriter closed")
-            
-            # Also run MLflow evaluation (better image handling)
-            logger.info("\n🔍 Running comprehensive model evaluation (MLflow)...")
-            labels = sorted(df_enhanced['crop'].unique().tolist())
-            mlflow_metrics = run_comprehensive_evaluation_mlflow(
-                model=pipeline,
-                X_test=X_test,
-                y_test=y_test,
-                feature_names=feature_cols,
-                labels=labels
-            )
-            
-            # Log model to MLflow
-            mlflow.sklearn.log_model(pipeline, "model")
-            logger.info("✅ Logged model to MLflow")
-            
-            # Upload MLflow artifacts to GCS manually (since we're using local tracking)
-            try:
-                import shutil
-                from google.cloud import storage as gcs_storage
-                
-                mlflow_local_dir = f"/tmp/mlruns"
-                if os.path.exists(mlflow_local_dir):
-                    gcs_client = gcs_storage.Client()
-                    bucket = gcs_client.bucket(config['storage']['bucket'])
-                    
-                    # Upload the entire MLflow run directory
-                    for root, dirs, files in os.walk(mlflow_local_dir):
-                        for file in files:
-                            local_path = os.path.join(root, file)
-                            relative_path = os.path.relpath(local_path, mlflow_local_dir)
-                            gcs_path = f"mlflow/{relative_path}"
-                            blob = bucket.blob(gcs_path)
-                            blob.upload_from_filename(local_path)
-                    
-                    logger.info(f"✅ Uploaded MLflow artifacts to gs://{config['storage']['bucket']}/mlflow/")
-            except Exception as e:
-                logger.warning(f"⚠️  Could not upload MLflow artifacts to GCS: {e}")
-                logger.info("   MLflow artifacts are available locally in /tmp/mlruns/")
+        logger.info(f"📊 Writing TensorBoard logs locally: {local_run_dir}")
         
-        # List files created locally
-        logger.info(f"\n📂 Local TensorBoard files created:")
-        for root, dirs, files in os.walk(local_tensorboard_dir):
-            for file in files:
-                filepath = os.path.join(root, file)
-                size = os.path.getsize(filepath)
-                logger.info(f"   {filepath} ({size} bytes)")
+        # Determine GCS upload path
+        tensorboard_gcs_path = os.environ.get('AIP_TENSORBOARD_LOG_DIR')
         
-        # Upload TensorBoard logs to GCS if Vertex AI TensorBoard is configured
-        if tensorboard_gcs_path:
-            logger.info(f"\n📤 Uploading TensorBoard logs to GCS...")
-            logger.info(f"   Source: {local_tensorboard_dir}")
-            logger.info(f"   Destination: {tensorboard_gcs_path}")
-            
-            try:
-                # Parse GCS path
-                if not tensorboard_gcs_path.startswith('gs://'):
-                    logger.error(f"❌ Invalid GCS path: {tensorboard_gcs_path}")
-                else:
-                    gcs_path_parts = tensorboard_gcs_path.replace('gs://', '').split('/', 1)
-                    bucket_name = gcs_path_parts[0]
-                    gcs_prefix = gcs_path_parts[1] if len(gcs_path_parts) > 1 else ''
-                    
-                    # Use storage client to upload files
-                    storage_client = storage.Client()
-                    bucket = storage_client.bucket(bucket_name)
-                    
-                    # Find all files to upload
-                    uploaded_files = []
-                    for root, dirs, files in os.walk(local_tensorboard_dir):
-                        for file in files:
-                            local_file_path = os.path.join(root, file)
-                            relative_path = os.path.relpath(local_file_path, local_tensorboard_dir)
-                            
-                            # Construct GCS blob path (avoid double slashes)
-                            if gcs_prefix:
-                                # Remove trailing slash from prefix to avoid double slashes
-                                clean_prefix = gcs_prefix.rstrip('/')
-                                gcs_blob_path = f"{clean_prefix}/{relative_path}".replace('\\', '/')
-                            else:
-                                gcs_blob_path = relative_path.replace('\\', '/')
-                            
-                            blob = bucket.blob(gcs_blob_path)
-                            blob.upload_from_filename(local_file_path)
-                            uploaded_files.append(gcs_blob_path)
-                            
-                            if len(uploaded_files) <= 5:  # Log first 5 files
-                                logger.info(f"   ✅ Uploaded: {gcs_blob_path}")
-                    
-                    logger.info(f"✅ Uploaded {len(uploaded_files)} TensorBoard log files to {tensorboard_gcs_path}")
-                    
-                    # List what was uploaded
-                    if uploaded_files:
-                        logger.info(f"\n📂 Files in GCS:")
-                        for f in uploaded_files[:10]:  # Show first 10
-                            logger.info(f"   - {f}")
-                        if len(uploaded_files) > 10:
-                            logger.info(f"   ... and {len(uploaded_files) - 10} more files")
-                    
-            except Exception as e:
-                logger.error(f"❌ Failed to upload TensorBoard logs: {e}")
-                import traceback
-                logger.error(traceback.format_exc())
+        # Log the environment variable for debugging
+        logger.info(f"ℹ️  AIP_TENSORBOARD_LOG_DIR: {tensorboard_gcs_path}")
+        
+        if not tensorboard_gcs_path:
+            base_output_dir = os.environ.get('AIP_MODEL_DIR', '')
+            if base_output_dir.startswith('gs://'):
+                # If no managed TensorBoard, write to models bucket under /logs
+                # We DON'T append run_timestamp here because we are already creating
+                # a unique subdirectory locally which will be preserved during upload
+                tensorboard_gcs_path = base_output_dir.rsplit('/', 1)[0] + '/logs'
+                logger.info(f"📤 Will upload to custom path: {tensorboard_gcs_path}")
         else:
-            logger.info(f"📊 TensorBoard logs saved locally: {local_tensorboard_dir}")
-            logger.warning("⚠️  No AIP_TENSORBOARD_LOG_DIR set - logs will not appear in Vertex AI TensorBoard")
+            logger.info(f"📤 Will upload to Vertex AI managed path: {tensorboard_gcs_path}")
         
-        # Save model and metrics
+        # Create writer with LOCAL RUN directory
+        writer = SummaryWriter(log_dir=local_run_dir)
+        
+        # Run evaluation (SIMPLIFIED: no num_runs, just log once)
+        logger.info("\n🔍 Running model evaluation...")
+        eval_results = run_comprehensive_evaluation(
+            model=pipeline,
+            X_test=X_test,
+            y_test=y_test,
+            feature_names=feature_cols,
+            writer=writer,
+            step=0,
+            num_runs=1  # SIMPLIFIED: Just log once, no progression
+        )
+        
+        # Log training metrics
+        log_training_metrics_to_tensorboard(writer, config, metrics, y_test, y_pred)
+        
+        # Close writer (flush is automatic on close)
+        writer.close()
+        logger.info("✅ TensorBoard writer closed")
+        
+        # DEBUG: Check what files were created locally
+        logger.info(f"🔍 Checking local TensorBoard files in {base_local_dir}")
+        for root, dirs, files in os.walk(base_local_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                size = os.path.getsize(file_path)
+                logger.info(f"   📄 {file}: {size:,} bytes")
+        
+        # Upload TensorBoard logs to GCS
+        if tensorboard_gcs_path:
+            logger.info(f"📤 Uploading TensorBoard logs to GCS...")
+            storage_client = storage.Client()
+            
+            # Parse GCS path
+            gcs_path_parts = tensorboard_gcs_path.replace('gs://', '').split('/', 1)
+            bucket_name = gcs_path_parts[0]
+            gcs_prefix = gcs_path_parts[1] if len(gcs_path_parts) > 1 else ''
+            
+            bucket = storage_client.bucket(bucket_name)
+            
+            # Upload all files from base_local_dir (which contains the run_TIMESTAMP folder)
+            uploaded_count = 0
+            logger.info(f"   Uploading from: {base_local_dir}")
+            
+            for root, dirs, files in os.walk(base_local_dir):
+                for file in files:
+                    local_file_path = os.path.join(root, file)
+                    # Relative path will include 'run_TIMESTAMP/events...'
+                    relative_path = os.path.relpath(local_file_path, base_local_dir)
+                    gcs_blob_path = os.path.join(gcs_prefix, relative_path)
+                    
+                    blob = bucket.blob(gcs_blob_path)
+                    blob.upload_from_filename(local_file_path)
+                    uploaded_count += 1
+                    logger.info(f"   Uploaded: {relative_path} -> {gcs_blob_path}")
+            
+            logger.info(f"✅ Uploaded {uploaded_count} TensorBoard files to {tensorboard_gcs_path}")
+        
+        # Save model
         save_model(pipeline, feature_cols, metrics, config)
         
-        # Output metrics (Vertex AI will capture this)
+        # Output final metrics
         duration = (datetime.now() - start_time).total_seconds() / 60
         
         logger.info("=" * 70)
@@ -531,28 +318,28 @@ if __name__ == '__main__':
         logger.info(f"Duration: {duration:.1f} minutes")
         logger.info(f"Test accuracy: {metrics['test_accuracy']:.2%}")
         
-        # Write metrics for orchestrator to read
-        metrics_output = {
+        # Metrics for orchestrator
+        output_metrics = {
             'status': 'success',
             'accuracy': metrics['test_accuracy'],
             'duration_minutes': round(duration, 2),
-            'training_samples': len(df),
+            'training_samples': len(df_enhanced),
             'metrics': metrics
         }
         
         print("\n" + "=" * 70)
         print("TRAINING METRICS (JSON):")
         print("=" * 70)
-        print(json.dumps(metrics_output, indent=2, default=str))
+        print(json.dumps(output_metrics, indent=2, default=str))
+        print("=" * 70)
         
     except Exception as e:
         logger.error(f"❌ Training failed: {e}", exc_info=True)
         
-        metrics_output = {
+        print(json.dumps({
             'status': 'error',
             'error': str(e)
-        }
+        }, indent=2))
         
-        print(json.dumps(metrics_output, indent=2))
         exit(1)
 

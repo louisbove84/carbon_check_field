@@ -23,7 +23,7 @@ from google.cloud import aiplatform
 # Configuration
 PROJECT_ID = "ml-pipeline-477612"
 LOCATION = "us-central1"
-TENSORBOARD_INSTANCE_ID = "8764605208211750912"
+TENSORBOARD_INSTANCE_ID = "1461173987500359680"
 
 
 def list_experiments():
