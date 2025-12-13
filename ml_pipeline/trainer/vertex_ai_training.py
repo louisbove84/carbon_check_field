@@ -17,7 +17,7 @@ import yaml
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from google.cloud import bigquery, storage
+from google.cloud import bigquery, storage, aiplatform
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
@@ -216,38 +216,46 @@ if __name__ == '__main__':
         pipeline, metrics, X_test, y_test, y_pred = train_model(df_enhanced, feature_cols, config)
         
         # === TENSORBOARD LOGGING ===
-        # IMPORTANT: SummaryWriter MUST write to LOCAL path (GCS doesn't support append mode)
-        # We'll upload to GCS after all logging is complete
-        base_local_dir = '/tmp/tensorboard_logs'
+        # Following the official GCP guide for Vertex AI TensorBoard integration
+        # KEY INSIGHT: Vertex AI automatically syncs logs from a LOCAL directory
+        # to the managed TensorBoard bucket when tensorboard= is set in the training job
         
-        # Create a unique subdirectory for this run
-        # This ensures that even if we upload to a shared GCS root, we get separation
+        # Check if AIP_TENSORBOARD_LOG_DIR is set (it should be for managed TensorBoard)
+        managed_tb_dir = os.environ.get('AIP_TENSORBOARD_LOG_DIR')
+        
+        # CRITICAL: Write to a SIMPLE local directory structure
+        # Vertex AI will automatically sync this to the managed bucket
+        # Structure: /tmp/tensorboard/ (flat, no subdirectories needed)
+        local_tb_dir = '/tmp/tensorboard'
+        os.makedirs(local_tb_dir, exist_ok=True)
+        
+        logger.info(f"📊 TensorBoard Configuration:")
+        logger.info(f"   AIP_TENSORBOARD_LOG_DIR: {managed_tb_dir if managed_tb_dir else 'NOT SET'}")
+        logger.info(f"   Local directory: {local_tb_dir}")
+        logger.info(f"   Vertex AI will auto-sync logs to managed TensorBoard bucket")
+        
+        # Create writer pointing to LOCAL directory (Vertex AI handles the rest)
+        writer = SummaryWriter(log_dir=local_tb_dir)
+        
+        # CRITICAL: Initialize Vertex AI Experiments to register in UI
+        experiment_name = os.environ.get('AIP_TENSORBOARD_EXPERIMENT_NAME', 'crop_training')
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        run_dir_name = f'run_{timestamp}'
-        local_run_dir = os.path.join(base_local_dir, run_dir_name)
-        os.makedirs(local_run_dir, exist_ok=True)
+        run_name = f'run_{timestamp}'
         
-        logger.info(f"📊 Writing TensorBoard logs locally: {local_run_dir}")
-        
-        # Determine GCS upload path
-        tensorboard_gcs_path = os.environ.get('AIP_TENSORBOARD_LOG_DIR')
-        
-        # Log the environment variable for debugging
-        logger.info(f"ℹ️  AIP_TENSORBOARD_LOG_DIR: {tensorboard_gcs_path}")
-        
-        if not tensorboard_gcs_path:
-            base_output_dir = os.environ.get('AIP_MODEL_DIR', '')
-            if base_output_dir.startswith('gs://'):
-                # If no managed TensorBoard, write to models bucket under /logs
-                # We DON'T append run_timestamp here because we are already creating
-                # a unique subdirectory locally which will be preserved during upload
-                tensorboard_gcs_path = base_output_dir.rsplit('/', 1)[0] + '/logs'
-                logger.info(f"📤 Will upload to custom path: {tensorboard_gcs_path}")
-        else:
-            logger.info(f"📤 Will upload to Vertex AI managed path: {tensorboard_gcs_path}")
-        
-        # Create writer with LOCAL RUN directory
-        writer = SummaryWriter(log_dir=local_run_dir)
+        try:
+            logger.info(f"🔗 Initializing Vertex AI Experiment: {experiment_name}")
+            aiplatform.init(
+                project=config['project']['id'],
+                location=config['project']['region'],
+                experiment=experiment_name,
+                experiment_tensorboard='projects/303566498201/locations/us-central1/tensorboards/3503556418512879616'
+            )
+            
+            # Start run - this creates it in the Experiments UI
+            aiplatform.start_run(run=run_name)
+            logger.info(f"✅ Started run: {run_name}")
+        except Exception as e:
+            logger.warning(f"⚠️  Could not start Vertex AI Experiment: {e}")
         
         # Run evaluation (SIMPLIFIED: no num_runs, just log once)
         logger.info("\n🔍 Running model evaluation...")
@@ -264,47 +272,58 @@ if __name__ == '__main__':
         # Log training metrics
         log_training_metrics_to_tensorboard(writer, config, metrics, y_test, y_pred)
         
-        # Close writer (flush is automatic on close)
+        # Log key metrics to Vertex AI Experiments (for UI display)
+        try:
+            aiplatform.log_metrics({
+                'accuracy': metrics['test_accuracy'],
+                'train_accuracy': metrics['train_accuracy'],
+                'num_features': len(feature_cols),
+                'num_samples': len(df_enhanced)
+            })
+            logger.info("✅ Logged metrics to Vertex AI Experiments")
+        except Exception as e:
+            logger.warning(f"⚠️  Could not log metrics to Vertex AI: {e}")
+        
+        # CRITICAL: Explicit flush and delay to ensure all data is written
+        logger.info("💾 Flushing TensorBoard writer...")
+        writer.flush()
+        
+        # IMPORTANT: Longer delay to ensure all images are fully written to disk
+        import time
+        logger.info("⏳ Waiting 5 seconds for images to write...")
+        time.sleep(5)
+        
+        # End Vertex AI Experiment run (registers it in UI)
+        try:
+            aiplatform.end_run()
+            logger.info("✅ Ended Vertex AI Experiment run")
+        except Exception as e:
+            logger.warning(f"⚠️  Could not end Vertex AI run: {e}")
+        
+        # Close writer
         writer.close()
         logger.info("✅ TensorBoard writer closed")
         
         # DEBUG: Check what files were created locally
-        logger.info(f"🔍 Checking local TensorBoard files in {base_local_dir}")
-        for root, dirs, files in os.walk(base_local_dir):
+        logger.info(f"🔍 Checking local TensorBoard files in {local_tb_dir}")
+        local_files = []
+        for root, dirs, files in os.walk(local_tb_dir):
             for file in files:
                 file_path = os.path.join(root, file)
                 size = os.path.getsize(file_path)
+                local_files.append((file, size))
                 logger.info(f"   📄 {file}: {size:,} bytes")
         
-        # Upload TensorBoard logs to GCS
-        if tensorboard_gcs_path:
-            logger.info(f"📤 Uploading TensorBoard logs to GCS...")
-            storage_client = storage.Client()
+        if not local_files:
+            logger.error("❌ No TensorBoard files were created!")
+        else:
+            logger.info(f"✅ TensorBoard files created: {len(local_files)} files")
+            logger.info("ℹ️  Vertex AI Experiments will automatically sync these logs")
             
-            # Parse GCS path
-            gcs_path_parts = tensorboard_gcs_path.replace('gs://', '').split('/', 1)
-            bucket_name = gcs_path_parts[0]
-            gcs_prefix = gcs_path_parts[1] if len(gcs_path_parts) > 1 else ''
-            
-            bucket = storage_client.bucket(bucket_name)
-            
-            # Upload all files from base_local_dir (which contains the run_TIMESTAMP folder)
-            uploaded_count = 0
-            logger.info(f"   Uploading from: {base_local_dir}")
-            
-            for root, dirs, files in os.walk(base_local_dir):
-                for file in files:
-                    local_file_path = os.path.join(root, file)
-                    # Relative path will include 'run_TIMESTAMP/events...'
-                    relative_path = os.path.relpath(local_file_path, base_local_dir)
-                    gcs_blob_path = os.path.join(gcs_prefix, relative_path)
-                    
-                    blob = bucket.blob(gcs_blob_path)
-                    blob.upload_from_filename(local_file_path)
-                    uploaded_count += 1
-                    logger.info(f"   Uploaded: {relative_path} -> {gcs_blob_path}")
-            
-            logger.info(f"✅ Uploaded {uploaded_count} TensorBoard files to {tensorboard_gcs_path}")
+            # Give Vertex AI time to sync files before job ends
+            logger.info("⏳ Waiting 15 seconds for Vertex AI to sync files...")
+            time.sleep(15)
+            logger.info("✅ Sync delay complete")
         
         # Save model
         save_model(pipeline, feature_cols, metrics, config)

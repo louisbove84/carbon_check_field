@@ -12,8 +12,6 @@ import logging
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import io
-from PIL import Image
 from sklearn.metrics import cohen_kappa_score, matthews_corrcoef
 from torch.utils.tensorboard import SummaryWriter
 from visualization_utils import (
@@ -27,52 +25,13 @@ from visualization_utils import (
 logger = logging.getLogger(__name__)
 
 
-def _convert_figure_to_tensorboard_image(fig):
-    """
-    SIMPLIFIED: Convert matplotlib figure to TensorBoard-compatible image.
-    Returns numpy array in CHW format, float32, normalized to [0, 1].
-    """
-    # Save figure to BytesIO buffer
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png', dpi=100, bbox_inches='tight', facecolor='white')
-    buf.seek(0)
-    
-    # Load as PIL Image
-    image = Image.open(buf)
-    
-    # Convert to RGB (TensorBoard requires RGB)
-    if image.mode != 'RGB':
-        if image.mode == 'RGBA':
-            # White background for transparency
-            rgb_image = Image.new('RGB', image.size, (255, 255, 255))
-            rgb_image.paste(image, mask=image.split()[3])
-            image = rgb_image
-        else:
-            image = image.convert('RGB')
-    
-    # Convert to numpy array (HWC format: height, width, channels)
-    image_array = np.array(image, dtype=np.uint8)
-    
-    # Convert to CHW format (TensorBoard requirement)
-    if len(image_array.shape) == 3:
-        image_array = np.transpose(image_array, (2, 0, 1))  # HWC -> CHW
-    
-    # Normalize to [0, 1] as float32
-    image_array = image_array.astype(np.float32) / 255.0
-    
-    buf.close()
-    
-    return image_array
-
-
 def log_confusion_matrix_to_tensorboard(writer, y_true, y_pred, labels, step=0):
     """Log confusion matrices to TensorBoard."""
     figures = create_confusion_matrix_figures(y_true, y_pred, labels)
     
     for name, fig in figures.items():
-        image_array = _convert_figure_to_tensorboard_image(fig)
-        writer.add_image(f'confusion_matrix/{name}', image_array, step, dataformats='CHW')
-        plt.close(fig)
+        # Use add_figure - better compatibility with Vertex AI TensorBoard
+        writer.add_figure(f'confusion_matrix/{name}', fig, step, close=True)
     
     logger.info("✅ Logged confusion matrices")
 
@@ -82,9 +41,7 @@ def log_per_crop_metrics_to_tensorboard(writer, y_true, y_pred, labels, step=0):
     figures, metrics_df = create_per_crop_metrics_figures(y_true, y_pred, labels)
     
     for name, fig in figures.items():
-        image_array = _convert_figure_to_tensorboard_image(fig)
-        writer.add_image(f'per_crop_metrics/{name}', image_array, step, dataformats='CHW')
-        plt.close(fig)
+        writer.add_figure(f'per_crop_metrics/{name}', fig, step, close=True)
     
     # Log scalars for each crop
     for _, row in metrics_df.iterrows():
@@ -108,9 +65,7 @@ def log_feature_importance_to_tensorboard(writer, model, feature_names, step=0):
     fig, filtered_names, filtered_importances = result
     
     # Log the figure
-    image_array = _convert_figure_to_tensorboard_image(fig)
-    writer.add_image('feature_importance/top_15', image_array, step, dataformats='CHW')
-    plt.close(fig)
+    writer.add_figure('feature_importance/top_15', fig, step, close=True)
     
     # Log top features as scalars
     if filtered_names and filtered_importances:
@@ -138,9 +93,7 @@ def log_misclassification_analysis_to_tensorboard(writer, y_true, y_pred, labels
         return misclass_df
     
     for name, fig in figures.items():
-        image_array = _convert_figure_to_tensorboard_image(fig)
-        writer.add_image(f'misclassification/{name}', image_array, step, dataformats='CHW')
-        plt.close(fig)
+        writer.add_figure(f'misclassification/{name}', fig, step, close=True)
     
     logger.info("✅ Logged misclassification analysis")
     return misclass_df
@@ -156,10 +109,8 @@ def log_advanced_metrics_to_tensorboard(writer, y_test, y_pred, step=0):
     # Create figure
     fig, metrics_dict = create_advanced_metrics_figure(y_test, y_pred, labels)
     
-    # Log image
-    image_array = _convert_figure_to_tensorboard_image(fig)
-    writer.add_image('metrics/overall', image_array, step, dataformats='CHW')
-    plt.close(fig)
+    # Log figure
+    writer.add_figure('metrics/overall', fig, step, close=True)
     
     # Log scalars
     writer.add_scalar('metrics/accuracy', metrics_dict['accuracy'], step)
