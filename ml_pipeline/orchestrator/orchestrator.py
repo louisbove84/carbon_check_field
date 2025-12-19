@@ -178,38 +178,133 @@ def export_earth_engine_data():
         project_id = config['project']['id']
         dataset_id = config['bigquery']['dataset']
         table_id = config['bigquery']['tables']['training']
+        region = config['project']['region']
         num_fields_per_crop = config.get('data_collection', {}).get('num_fields_per_crop', 30)
         num_samples_per_field = config.get('data_collection', {}).get('num_samples_per_field', 3)
         crops = config['data_collection']['crops']
+        collect_other = config.get('data_collection', {}).get('collect_other', True)
         
+        # Calculate total samples (including "Other" if enabled)
         total_samples = num_fields_per_crop * num_samples_per_field * len(crops)
+        if collect_other:
+            num_other_fields = config.get('data_collection', {}).get('num_other_fields', num_fields_per_crop)
+            total_samples += num_other_fields * num_samples_per_field
+        
+        # Ensure BigQuery dataset exists (create if needed)
+        from google.cloud import bigquery
+        bq_client = bigquery.Client(project=project_id)
+        try:
+            dataset_ref = bq_client.dataset(dataset_id)
+            dataset = bq_client.get_dataset(dataset_ref)
+            logger.info(f"   ✅ Dataset {dataset_id} exists (location: {dataset.location})")
+        except Exception:
+            # Create dataset if it doesn't exist
+            # Use "US" multi-region for Earth Engine compatibility
+            logger.info(f"   📊 Creating BigQuery dataset {dataset_id}...")
+            dataset_ref = bq_client.dataset(dataset_id)
+            dataset = bigquery.Dataset(dataset_ref)
+            dataset.location = 'US'  # Use US multi-region for Earth Engine compatibility
+            dataset = bq_client.create_dataset(dataset, exists_ok=True)
+            logger.info(f"   ✅ Created dataset {dataset_id} in US")
+        
+        # Check if data already exists (skip collection if recent data exists and overwrite is False)
+        overwrite_table = config.get('data_collection', {}).get('overwrite_table', True)
+        if not overwrite_table:
+            try:
+                # Don't specify location - let BigQuery auto-detect (works for both US and us-central1)
+                check_query = f"SELECT COUNT(*) as count FROM `{project_id}.{dataset_id}.{table_id}`"
+                result = bq_client.query(check_query).to_dataframe()
+                existing_count = result['count'].iloc[0]
+                
+                if existing_count > 0:
+                    logger.info(f"   ℹ️  Found {existing_count} existing samples in BigQuery")
+                    logger.info(f"   ⏭️  Skipping data collection (overwrite_table=false)")
+                    return {
+                        'status': 'success',
+                        'samples_collected': existing_count,
+                        'task_id': None,
+                        'export_completed': True,
+                        'table': f'{project_id}.{dataset_id}.{table_id}',
+                        'row_count': existing_count,
+                        'skipped': True
+                    }
+            except Exception as e:
+                logger.warning(f"   ⚠️  Could not check existing data: {e}")
+                logger.info("   📥 Proceeding with data collection...")
         
         logger.info(f"   Collecting {total_samples} total samples...")
         logger.info(f"   Crops: {[c['name'] for c in crops]}")
+        if collect_other:
+            logger.info(f"   Including 'Other' category")
         logger.info(f"   Samples per crop: {num_fields_per_crop * num_samples_per_field}")
         
         # Collect training data from Earth Engine
         logger.info("   🌍 Collecting samples from Earth Engine...")
         training_data = collect_training_data(config)
         
-        # Export directly to BigQuery
+        # Export directly to BigQuery (overwrite mode to start fresh with balanced data)
         logger.info("   📤 Exporting to BigQuery...")
-        task_id = export_to_bigquery(training_data, project_id, dataset_id, table_id)
+        task_id = export_to_bigquery(training_data, project_id, dataset_id, table_id, overwrite=overwrite_table)
         
         # Wait for export to complete (with timeout)
         logger.info("   ⏳ Waiting for export to complete...")
         success = wait_for_export(task_id, timeout_minutes=30)
         
         if not success:
-            logger.warning("   ⚠️  Export may still be running - check Earth Engine Tasks")
-            logger.warning("   ⚠️  Pipeline will continue, but data may not be available yet")
+            error_msg = f"Export task {task_id} did not complete successfully"
+            logger.error(f"   ❌ {error_msg}")
+            logger.error("   ⚠️  Cannot proceed with training - data not available in BigQuery")
+            return {
+                'status': 'error',
+                'error': error_msg,
+                'samples_collected': total_samples,
+                'task_id': task_id,
+                'export_completed': False,
+                'table': f'{project_id}.{dataset_id}.{table_id}'
+            }
+        
+        # Verify data exists in BigQuery before proceeding
+        logger.info("   🔍 Verifying data in BigQuery...")
+        try:
+            from google.cloud import bigquery
+            # Don't specify location - let BigQuery auto-detect (works for both US and us-central1)
+            bq_client = bigquery.Client(project=project_id)
+            verify_query = f"SELECT COUNT(*) as count FROM `{project_id}.{dataset_id}.{table_id}`"
+            result = bq_client.query(verify_query).to_dataframe()
+            row_count = result['count'].iloc[0]
+            
+            if row_count == 0:
+                error_msg = f"BigQuery table exists but is empty (0 rows)"
+                logger.error(f"   ❌ {error_msg}")
+                return {
+                    'status': 'error',
+                    'error': error_msg,
+                    'samples_collected': total_samples,
+                    'task_id': task_id,
+                    'export_completed': False,
+                    'table': f'{project_id}.{dataset_id}.{table_id}'
+                }
+            
+            logger.info(f"   ✅ Verified {row_count} rows in BigQuery table")
+        except Exception as e:
+            error_msg = f"Failed to verify BigQuery data: {e}"
+            logger.error(f"   ❌ {error_msg}")
+            return {
+                'status': 'error',
+                'error': error_msg,
+                'samples_collected': total_samples,
+                'task_id': task_id,
+                'export_completed': False,
+                'table': f'{project_id}.{dataset_id}.{table_id}'
+            }
         
         return {
             'status': 'success',
             'samples_collected': total_samples,
             'task_id': task_id,
-            'export_completed': success,
-            'table': f'{project_id}.{dataset_id}.{table_id}'
+            'export_completed': True,
+            'table': f'{project_id}.{dataset_id}.{table_id}',
+            'row_count': row_count
         }
     
     except Exception as e:

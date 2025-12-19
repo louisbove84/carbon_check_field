@@ -64,6 +64,7 @@ def load_training_data(config):
     project_id = config['project']['id']
     dataset = config['bigquery']['dataset']
     table = config['bigquery']['tables']['training']
+    region = config['project']['region']
     
     query = f"""
         SELECT 
@@ -75,13 +76,29 @@ def load_training_data(config):
         WHERE crop IS NOT NULL
     """
     
+    # Create BigQuery client - don't specify location to auto-detect (works for both US and us-central1)
     client = bigquery.Client(project=project_id)
-    df = client.query(query).to_dataframe()
     
-    logger.info(f"✅ Loaded {len(df)} samples")
-    logger.info(f"   Crops: {df['crop'].value_counts().to_dict()}")
+    logger.info(f"   Project: {project_id}")
+    logger.info(f"   Dataset: {dataset}")
+    logger.info(f"   Table: {table}")
     
-    return df
+    try:
+        # Don't specify location parameter - let BigQuery auto-detect dataset location
+        df = client.query(query).to_dataframe()
+        
+        if len(df) == 0:
+            raise ValueError(f"BigQuery table {project_id}.{dataset}.{table} exists but is empty!")
+        
+        logger.info(f"✅ Loaded {len(df)} samples")
+        logger.info(f"   Crops: {df['crop'].value_counts().to_dict()}")
+        
+        return df
+    except Exception as e:
+        logger.error(f"❌ Failed to load data from BigQuery: {e}")
+        logger.error(f"   Table: {project_id}.{dataset}.{table}")
+        logger.error(f"   Location: {region}")
+        raise
 
 
 def engineer_features(df, config):

@@ -125,6 +125,12 @@ data_collection:
   # 'Other' category settings (non-crop areas: buildings, roads, lakes, trees, etc.)
   collect_other: true  # Set to false to skip 'Other' category collection
   num_other_fields: 30  # Number of non-crop fields to sample (same as crops by default)
+  non_crop_buffer_meters: 150  # Minimum distance (meters) from crop areas for non-crop sampling
+                                 # Prevents sampling near crop field edges to avoid confusion
+  
+  # Data export settings
+  overwrite_table: false  # Set to true to clear BigQuery table and start fresh with balanced data
+                          # Set to false to use existing data (skip collection if data exists)
 
 # ============================================================
 # QUALITY GATES (Most commonly adjusted!)

@@ -32,7 +32,7 @@ trainer_dir = Path(__file__).parent.parent / 'trainer'
 sys.path.insert(0, str(trainer_dir))
 
 from tensorboard_logging import run_comprehensive_evaluation
-from feature_engineering import engineer_features_dataframe, compute_elevation_quantiles
+from feature_engineering import engineer_features_dataframe
 from torch.utils.tensorboard import SummaryWriter
 
 # Setup logging
@@ -87,11 +87,7 @@ def load_config(config_path=None, bucket_name=None):
             },
             'storage': {'bucket': 'carboncheck-data'},
             'features': {
-                'elevation_quantiles': {
-                    'q25': 0.0,
-                    'q50': 0.0,
-                    'q75': 0.0
-                }
+                # REMOVED: elevation_quantiles — elevation removed from feature set
             }
         }
     except Exception as e:
@@ -349,18 +345,8 @@ Examples:
         # Engineer features (same as training)
         logger.info("🔧 Engineering features...")
         
-        # Get elevation quantiles from config or compute from data
-        elevation_quantiles = None
-        if 'features' in config and 'elevation_quantiles' in config['features']:
-            elevation_quantiles = config['features']['elevation_quantiles']
-            logger.info(f"   Using elevation quantiles from config: {elevation_quantiles}")
-        
-        if not elevation_quantiles or not elevation_quantiles.get('q25'):
-            logger.info("   Computing elevation quantiles from data...")
-            elevation_quantiles = compute_elevation_quantiles(df)
-            logger.info(f"   Elevation quantiles: {elevation_quantiles}")
-        
-        df_enhanced, feature_cols_engineered = engineer_features_dataframe(df, elevation_quantiles)
+        # REMOVED: elevation_quantiles — elevation removed from feature set
+        df_enhanced, feature_cols_engineered = engineer_features_dataframe(df)
         
         # Use feature names that match what the model was trained with
         # Check what the model expects

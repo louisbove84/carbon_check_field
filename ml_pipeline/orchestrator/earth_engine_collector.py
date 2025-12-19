@@ -32,10 +32,19 @@ logger = logging.getLogger(__name__)
 def initialize_earth_engine(project_id: str):
     """Initialize Earth Engine with the project."""
     try:
-        ee.Initialize(project=project_id)
-        logger.info("✅ Earth Engine initialized")
+        # Try to initialize with project first
+        try:
+            ee.Initialize(project=project_id)
+            logger.info("✅ Earth Engine initialized with project")
+        except Exception as project_error:
+            # If project initialization fails, try default credentials
+            logger.warning(f"⚠️  Project initialization failed: {project_error}")
+            logger.info("   Trying default credentials...")
+            ee.Initialize()  # Use default credentials
+            logger.info("✅ Earth Engine initialized with default credentials")
     except Exception as e:
         logger.error(f"❌ Earth Engine initialization failed: {e}")
+        logger.error("   Make sure you're authenticated: earthengine authenticate")
         raise
 
 
@@ -151,11 +160,33 @@ def sample_non_crop_areas(config: Dict[str, Any], cdl_year: int,
     # Load CDL
     cdl = ee.Image(f'USDA/NASS/CDL/{cdl_year}').select('cropland')
     
-    # Create mask for non-crop areas (exclude all crop codes)
-    # Start with all pixels, then mask out crop codes
-    non_crop_mask = cdl
+    # Create mask for crop areas (all crop codes combined)
+    crop_mask = ee.Image.constant(0)
     for crop_code in crop_codes:
-        non_crop_mask = non_crop_mask.updateMask(non_crop_mask.neq(crop_code))
+        crop_mask = crop_mask.add(cdl.eq(crop_code))
+    crop_mask = crop_mask.gt(0)  # 1 where any crop exists, 0 elsewhere
+    
+    # Create buffer around crop areas to exclude edge cases
+    # Buffer distance in meters - ensures non-crop samples are clearly separated from crops
+    buffer_distance_meters = config.get('data_collection', {}).get('non_crop_buffer_meters', 150)
+    crop_buffer = crop_mask.focal_max(radius=buffer_distance_meters / 30, units='pixels')
+    
+    # Create mask for non-crop areas (exclude all crop codes AND buffered areas)
+    # Build a binary mask: 1 if pixel is NOT any crop code AND not in buffer zone
+    non_crop_binary = ee.Image.constant(1)
+    
+    # Exclude crop pixels
+    for crop_code in crop_codes:
+        non_crop_binary = non_crop_binary.multiply(cdl.neq(crop_code))
+    
+    # Exclude buffered areas around crops
+    non_crop_binary = non_crop_binary.multiply(crop_buffer.eq(0))
+    
+    # Convert binary mask (0 or 1) to actual mask (True or False)
+    # Mask out pixels where binary = 0 (i.e., pixels that ARE crop codes or in buffer zone)
+    non_crop_mask = cdl.updateMask(non_crop_binary.eq(1))
+    
+    logger.info(f"   🛡️  Added {buffer_distance_meters}m buffer around crop areas to avoid edge cases")
     
     # Use a mix of counties from different regions for diversity
     # Sample from the same counties used for crops, but get non-crop areas
@@ -181,10 +212,11 @@ def sample_non_crop_areas(config: Dict[str, Any], cdl_year: int,
         samples_needed = target_samples - samples_collected
         
         # Sample from non-crop areas in this county
+        # Use higher buffer since non-crop areas might be sparser
         county_samples = non_crop_mask.sample(
             region=county_region,
             scale=30,
-            numPixels=samples_needed * 500,  # 500x buffer
+            numPixels=samples_needed * 1000,  # 1000x buffer (non-crop areas can be sparse)
             seed=999 + i,  # Different seed for 'Other' category
             geometries=True,
             tileScale=16
@@ -258,13 +290,61 @@ def collect_training_data(config: Dict[str, Any]) -> ee.FeatureCollection:
     return all_training_data
 
 
+def clear_bigquery_table(project_id: str, dataset_id: str, table_id: str) -> bool:
+    """
+    Delete BigQuery table to start fresh (drops entire table, not just clears rows).
+    
+    This ensures Earth Engine can create a fresh table with append=False mode.
+    
+    Args:
+        project_id: GCP project ID
+        dataset_id: BigQuery dataset ID
+        table_id: BigQuery table ID
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        from google.cloud import bigquery
+        
+        client = bigquery.Client(project=project_id)
+        table_ref = client.dataset(dataset_id).table(table_id)
+        
+        logger.info(f"🗑️  Deleting BigQuery table: {project_id}.{dataset_id}.{table_id}")
+        
+        # Delete the entire table (not just rows)
+        # This allows Earth Engine to create a fresh table with append=False
+        try:
+            client.delete_table(table_ref, not_found_ok=True)
+            logger.info(f"✅ Table deleted successfully")
+        except Exception as delete_error:
+            # If table doesn't exist, that's fine - Earth Engine will create it
+            logger.info(f"   Table doesn't exist yet (will be created on export)")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to delete table: {e}")
+        logger.error(f"   Table might not exist yet (will be created on first export)")
+        return False
+
+
 def export_to_bigquery(feature_collection: ee.FeatureCollection, 
-                       project_id: str, dataset_id: str, table_id: str) -> str:
+                       project_id: str, dataset_id: str, table_id: str,
+                       overwrite: bool = False) -> str:
     """
     Export FeatureCollection directly to BigQuery.
     
+    Exports ALL samples including:
+    - Crop samples (Corn, Soybeans, Winter Wheat, Alfalfa) with crop_code = CDL code
+    - Non-crop samples ('Other' category) with crop='Other' and crop_code=0
+    
+    The model will be trained on all categories, allowing it to distinguish between
+    crops and non-crop areas (parking lots, buildings, roads, etc.). The app will
+    reject 'Other' predictions to prevent carbon credit estimates for non-crop land.
+    
     Args:
-        feature_collection: Earth Engine FeatureCollection
+        feature_collection: Earth Engine FeatureCollection (includes all crops + 'Other')
         project_id: GCP project ID
         dataset_id: BigQuery dataset ID
         table_id: BigQuery table ID
@@ -272,6 +352,22 @@ def export_to_bigquery(feature_collection: ee.FeatureCollection,
     Returns:
         Task ID for monitoring
     """
+    # Ensure BigQuery dataset exists before export
+    from google.cloud import bigquery
+    bq_client = bigquery.Client(project=project_id)
+    try:
+        dataset_ref = bq_client.dataset(dataset_id)
+        dataset = bq_client.get_dataset(dataset_ref)
+        logger.info(f"   ✅ Dataset {dataset_id} exists (location: {dataset.location})")
+    except Exception:
+        # Create dataset if it doesn't exist (use US multi-region for compatibility)
+        logger.info(f"   📊 Creating BigQuery dataset {dataset_id}...")
+        dataset_ref = bq_client.dataset(dataset_id)
+        dataset = bigquery.Dataset(dataset_ref)
+        dataset.location = 'US'  # Use US multi-region for Earth Engine compatibility
+        dataset = bq_client.create_dataset(dataset, exists_ok=True)
+        logger.info(f"   ✅ Created dataset {dataset_id} in US")
+    
     # Create field_id for each sample
     def add_field_id(feature):
         coords = feature.geometry().coordinates()
@@ -283,15 +379,24 @@ def export_to_bigquery(feature_collection: ee.FeatureCollection,
     feature_collection = feature_collection.map(add_field_id)
     
     # Export to BigQuery
+    # NOTE: 'crop' field includes 'Other' category for non-crop samples
+    # This allows the model to learn to distinguish crops from non-crop areas
     table_ref = f'{project_id}.{dataset_id}.{table_id}'
+    
+    # Delete table if overwrite mode (so Earth Engine can create fresh table)
+    if overwrite:
+        clear_bigquery_table(project_id, dataset_id, table_id)
+        append_mode = False  # Create new table (since we deleted the old one)
+    else:
+        append_mode = True  # Append to existing table
     
     task = ee.batch.Export.table.toBigQuery(
         collection=feature_collection,
         description='crop_features_to_bigquery_automated',
         table=table_ref,
-        append=True,  # Add to existing table
+        append=append_mode,
         selectors=[
-            'field_id', 'crop', 'crop_code',
+            'field_id', 'crop', 'crop_code',  # 'crop'='Other' for non-crop samples
             'ndvi_mean', 'ndvi_std', 'ndvi_min', 'ndvi_max',
             'ndvi_p25', 'ndvi_p50', 'ndvi_p75',
             'ndvi_early', 'ndvi_late',
@@ -304,7 +409,10 @@ def export_to_bigquery(feature_collection: ee.FeatureCollection,
     
     logger.info(f"✅ Export task started: {task.id}")
     logger.info(f"   Destination: {table_ref}")
-    logger.info(f"   Mode: WRITE_APPEND (adds to existing data)")
+    if overwrite:
+        logger.info(f"   Mode: WRITE_TRUNCATE (table deleted, creating fresh table)")
+    else:
+        logger.info(f"   Mode: WRITE_APPEND (adds to existing data)")
     
     return task.id
 
@@ -350,8 +458,25 @@ def wait_for_export(task_id: str, timeout_minutes: int = 30):
                 logger.info(f"✅ Export completed successfully!")
                 return True
             elif state == 'FAILED':
-                error_msg = getattr(task, 'error_message', 'Unknown error')
+                # Try to get detailed error message
+                error_msg = 'Unknown error'
+                try:
+                    if hasattr(task, 'error_message') and task.error_message:
+                        error_msg = task.error_message
+                    elif hasattr(task, 'error') and task.error:
+                        error_msg = str(task.error)
+                    # Try to get from task config
+                    if hasattr(task, 'config') and task.config:
+                        error_info = task.config.get('error', {})
+                        if error_info:
+                            error_msg = str(error_info)
+                except Exception as e:
+                    logger.warning(f"   Could not extract error details: {e}")
+                
                 logger.error(f"❌ Export failed: {error_msg}")
+                logger.error(f"   Task ID: {task_id}")
+                logger.error(f"   Check Earth Engine Tasks console for details:")
+                logger.error(f"   https://code.earthengine.google.com/tasks")
                 return False
             elif state == 'CANCELLED':
                 logger.warning(f"⚠️  Export was cancelled")
@@ -372,4 +497,55 @@ def wait_for_export(task_id: str, timeout_minutes: int = 30):
     logger.warning(f"   Task may still be running - check Earth Engine Tasks tab")
     logger.warning(f"   Pipeline will continue, but data may not be available yet")
     return False
+
+
+if __name__ == '__main__':
+    """
+    Run Earth Engine collector directly to generate and export 'Other' samples.
+    Usage: python earth_engine_collector.py
+    """
+    import yaml
+    from pathlib import Path
+    
+    # Load config
+    config_path = Path(__file__).parent / 'config.yaml'
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    
+    project_id = config['project']['id']
+    dataset_id = config['bigquery']['dataset']
+    table_id = config['bigquery']['tables']['training']
+    
+    logger.info("=" * 70)
+    logger.info("🌍 EARTH ENGINE DATA COLLECTION")
+    logger.info("=" * 70)
+    logger.info(f"Collecting samples for all crops + 'Other' category")
+    logger.info(f"Exporting to: {project_id}.{dataset_id}.{table_id}")
+    
+    # Check if we should overwrite (start fresh)
+    overwrite_table = config.get('data_collection', {}).get('overwrite_table', True)
+    if overwrite_table:
+        logger.info("⚠️  Mode: OVERWRITE (will clear existing data for balanced dataset)")
+    else:
+        logger.info("⚠️  Mode: APPEND (will add to existing data)")
+    logger.info("")
+    
+    # Collect training data (includes 'Other' if collect_other=True)
+    training_data = collect_training_data(config)
+    
+    # Export to BigQuery
+    task_id = export_to_bigquery(training_data, project_id, dataset_id, table_id, overwrite=overwrite_table)
+    
+    logger.info("")
+    logger.info("⏳ Waiting for export to complete (this may take 5-15 minutes)...")
+    logger.info(f"   Task ID: {task_id}")
+    logger.info("   Check progress in Earth Engine Tasks tab")
+    logger.info("")
+    
+    success = wait_for_export(task_id, timeout_minutes=30)
+    
+    if success:
+        logger.info("✅ Export complete! 'Other' samples are now in BigQuery.")
+    else:
+        logger.warning("⚠️  Export may still be running - check Earth Engine Tasks")
 

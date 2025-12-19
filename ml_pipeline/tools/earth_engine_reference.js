@@ -1,9 +1,10 @@
 // ============================================================
-// CROP CLASSIFICATION TRAINING DATA GENERATOR
+// EARTH ENGINE DATA COLLECTOR - VISUALIZATION & DEBUGGING
 // ============================================================
-// PURPOSE: Generate CDL-verified training data for ML models
-// EXPORT: Directly to gs://carboncheck-data for ML pipeline
-// PROJECT: ml-pipeline-477612 → BigQuery → Vertex AI
+// PURPOSE: Visualize what earth_engine_collector.py is doing
+// MATCHES: Python collector logic exactly (feature extraction, sampling)
+// USE: Debug data collection issues, visualize sample locations
+// NO EXPORT: This script only visualizes - no BigQuery export
 // ============================================================
 //
 // 🔧 TROUBLESHOOTING:
@@ -26,6 +27,10 @@ var NUM_FIELDS_PER_CROP = 30;     // Number of fields per crop (increased for mo
 var NUM_SAMPLES_PER_FIELD = 3;    // Number of samples per field (30*3*4 crops = 360 total samples)
 var FIELD_RADIUS = 200;           // Buffer radius in meters (not used with new sampling)
 var CDL_YEAR = 2024;              // Which CDL year to use
+var COLLECT_OTHER = true;         // Set to false to skip non-crop sampling (matches Python collect_other flag)
+var NUM_OTHER_FIELDS = NUM_FIELDS_PER_CROP;  // Number of non-crop fields to sample (match Python default)
+var NON_CROP_BUFFER_METERS = 150;  // Minimum distance (meters) from crop areas for non-crop sampling
+                                    // Prevents sampling near crop field edges to avoid confusion
 
 // NOTE: Each sample point is CDL-verified to ensure it matches the target crop!
 // NOTE: Using top-producing counties for fastest, most reliable sampling
@@ -77,27 +82,122 @@ print('════════════════════════�
 print('🌾 CROP SAMPLING PIPELINE (CDL-VERIFIED)');
 print('═══════════════════════════════════════');
 print('Samples per crop:', NUM_FIELDS_PER_CROP * NUM_SAMPLES_PER_FIELD);
-print('Total samples:', NUM_FIELDS_PER_CROP * NUM_SAMPLES_PER_FIELD * CROPS.length, '✅ (meets 100+ minimum!)');
+var totalCropSamples = NUM_FIELDS_PER_CROP * NUM_SAMPLES_PER_FIELD * CROPS.length;
+var totalOtherSamples = COLLECT_OTHER ? (NUM_OTHER_FIELDS * NUM_SAMPLES_PER_FIELD) : 0;
+print('Total samples:', totalCropSamples + totalOtherSamples, '✅ (meets 100+ minimum!)');
 print('CDL Year:', CDL_YEAR);
-print('Export target: BigQuery (direct export)');
-print('Sampling strategy: Top 10 producing counties per crop');
+print('Mode: VISUALIZATION ONLY (no export)');
+print('Sampling strategy: Top counties per crop, diverse counties for non-crop');
 print('Verification: Samples are spatially filtered to match CDL crop type');
+print('Non-crop sampling:', COLLECT_OTHER ? 'ENABLED' : 'DISABLED');
 print('');
 
 // ---------------------------------------------------------------
-// 2. MAP SETUP
+// 2. MAP SETUP (will be centered on 'Other' sample if available)
 // ---------------------------------------------------------------
-// Map.setCenter(-98, 39, 5);  // Center on US
-Map.setCenter(-88.43055692640955, 44.409572652286904, 6);  // Center on specific location
 Map.setOptions('SATELLITE');
 
-// Load CDL for background
+// Load CDL for background (needed for finding 'Other' samples)
 var cdl = ee.Image('USDA/NASS/CDL/' + CDL_YEAR).select('cropland');
 
+// Try to get multiple 'Other' sample locations to center the map and show markers
+// This helps visualize what non-crop areas look like
+var previewOtherSamples = ee.FeatureCollection([]);
+if (COLLECT_OTHER) {
+  print('📍 Finding "Other" sample locations to preview on map...');
+  try {
+    // Create non-crop mask with buffer exclusion
+    var cropCodes = CROPS.map(function(crop) { return crop.code; });
+    
+    // Create crop mask and buffer
+    var cropMask = ee.Image.constant(0);
+    for (var i = 0; i < cropCodes.length; i++) {
+      cropMask = cropMask.add(cdl.eq(cropCodes[i]));
+    }
+    cropMask = cropMask.gt(0);
+    var bufferDistanceMeters = NON_CROP_BUFFER_METERS;
+    var cropBuffer = cropMask.focalMax({
+      radius: bufferDistanceMeters / 30,
+      units: 'pixels'
+    });
+    
+    // Create non-crop mask excluding crops and buffer zones
+    var nonCropBinary = ee.Image.constant(1);
+    for (var i = 0; i < cropCodes.length; i++) {
+      nonCropBinary = nonCropBinary.multiply(cdl.neq(cropCodes[i]));
+    }
+    nonCropBinary = nonCropBinary.multiply(cropBuffer.eq(0));
+    var nonCropMask = cdl.updateMask(nonCropBinary.eq(1));
+    
+    // Sample from multiple counties to get diverse non-crop areas
+    var counties = ee.FeatureCollection('TIGER/2018/Counties');
+    var previewSamples = ee.FeatureCollection([]);
+    
+    // Get samples from first 3 counties to show variety
+    for (var i = 0; i < Math.min(3, CROPS[0].counties.length); i++) {
+      var countyGEOID = CROPS[0].counties[i];
+      var countyRegion = counties.filter(ee.Filter.eq('GEOID', countyGEOID)).geometry();
+      
+      // Sample 5 pixels per county for preview
+      var countySamples = nonCropMask.sample({
+        region: countyRegion,
+        scale: 30,
+        numPixels: 5000,
+        seed: 999 + i,
+        geometries: true,
+        tileScale: 16
+      }).limit(5);
+      
+      previewSamples = previewSamples.merge(countySamples);
+    }
+    
+    previewOtherSamples = previewSamples;
+    var previewCount = previewSamples.size().getInfo();
+    
+    if (previewCount > 0) {
+      // Get first sample coordinates to center map
+      var firstSample = previewSamples.first();
+      var coords = firstSample.geometry().coordinates();
+      var lon = coords.get(0).getInfo();
+      var lat = coords.get(1).getInfo();
+      print('✅ Found', previewCount, '"Other" preview samples');
+      print('   Centering map on first sample:', lon.toFixed(6) + ', ' + lat.toFixed(6));
+      Map.setCenter(lon, lat, 12);  // Zoom level 12 to see multiple markers
+      
+      // Add preview markers immediately (before main collection)
+      Map.addLayer(
+        previewSamples.style({
+          color: 'FF0000',  // Red markers for preview
+          pointSize: 15,
+          pointShape: 'diamond',  // Diamond shape to distinguish from final samples
+          width: 4,
+          fillColor: 'FF0000'
+        }),
+        {},
+        '🔍 Preview: Other Sample Locations (' + previewCount + ')',
+        true
+      );
+    } else {
+      print('⚠️  Could not find "Other" preview samples, using default center');
+      Map.setCenter(-88.43055692640955, 44.409572652286904, 6);
+    }
+  } catch (e) {
+    print('⚠️  Could not find "Other" sample location, using default center');
+    print('   Error:', e.toString());
+    Map.setCenter(-88.43055692640955, 44.409572652286904, 6);  // Default center
+  }
+} else {
+  Map.setCenter(-88.43055692640955, 44.409572652286904, 6);  // Default center
+}
+
 // Create a simplified visualization (only show our target crops)
-var cdlVis = cdl.remap(
-  [1, 5, 24, 36],           // CDL codes for our crops
-  [1, 2, 3, 4]              // Remap to sequential values for palette
+// Use expression to remap values: if crop code matches, map to 1-4, else mask out
+var cdlVis = cdl.expression(
+  '(cropland == 1) ? 1 : ' +  // Corn -> 1
+  '(cropland == 5) ? 2 : ' +  // Soybeans -> 2
+  '(cropland == 24) ? 3 : ' + // Winter Wheat -> 3
+  '(cropland == 36) ? 4 : 0', // Alfalfa -> 4, else 0
+  {'cropland': cdl}
 ).selfMask();
 
 Map.addLayer(cdlVis, {
@@ -105,6 +205,32 @@ Map.addLayer(cdlVis, {
   max: 4,
   palette: ['FFD300', '267300', 'A57000', 'FF00FF']  // Corn, Soy, Wheat, Alfalfa
 }, 'CDL ' + CDL_YEAR + ' (Target Crops)', true, 0.7);
+
+// Add buffer zone visualization if collecting 'Other' samples
+if (COLLECT_OTHER) {
+  // Create crop mask and buffer for visualization
+  var cropCodes = CROPS.map(function(crop) { return crop.code; });
+  var cropMask = ee.Image.constant(0);
+  for (var i = 0; i < cropCodes.length; i++) {
+    cropMask = cropMask.add(cdl.eq(cropCodes[i]));
+  }
+  cropMask = cropMask.gt(0);
+  var cropBuffer = cropMask.focalMax({
+    radius: NON_CROP_BUFFER_METERS / 30,
+    units: 'pixels'
+  });
+  
+  // Show buffer zone (areas excluded from non-crop sampling)
+  var bufferZone = cropBuffer.subtract(cropMask);  // Buffer minus crops = just the buffer
+  Map.addLayer(
+    bufferZone.selfMask(),
+    {palette: ['FFFF00'], min: 0, max: 1},  // Yellow for buffer zone
+    '🛡️ Crop Buffer Zone (' + NON_CROP_BUFFER_METERS + 'm) - Excluded from "Other"',
+    false  // Hidden by default, can be toggled
+  );
+  
+  print('💡 TIP: Toggle "Crop Buffer Zone" layer to see areas excluded from non-crop sampling');
+}
 
 // ---------------------------------------------------------------
 // 3. CREATE LEGEND
@@ -125,7 +251,17 @@ var legendTitle = ui.Label({
 legend.add(legendTitle);
 
 legend.add(ui.Label({
-  value: '▼ = Sample point (bottom tip = exact location)',
+  value: '▼ = Crop sample (bottom tip = exact location)',
+  style: {fontSize: '11px', margin: '0 0 4px 0', color: '666'}
+}));
+
+legend.add(ui.Label({
+  value: '● = Other (non-crop) sample',
+  style: {fontSize: '11px', margin: '0 0 4px 0', color: '666'}
+}));
+
+legend.add(ui.Label({
+  value: '🔴 = Preview Other locations',
   style: {fontSize: '11px', margin: '0 0 8px 0', color: '666'}
 }));
 
@@ -158,6 +294,11 @@ CROPS.forEach(function(crop) {
   addLegendRow(crop.color, crop.name);
 });
 
+// Add 'Other' category to legend if enabled
+if (COLLECT_OTHER) {
+  addLegendRow('808080', 'Other (Non-Crop)');
+}
+
 Map.add(legend);
 
 // ---------------------------------------------------------------
@@ -177,82 +318,67 @@ function extractFeatures(point) {
   var startDate = ee.Date(CDL_YEAR + '-04-15');
   var endDate = ee.Date(CDL_YEAR + '-09-01');
   
-  // Get Sentinel-2 data
+  // Get Sentinel-2 data (MATCHES Python: 20% cloud filter)
   var s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
     .filterDate(startDate, endDate)
     .filterBounds(point)
-    .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 30));
+    .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20));  // Changed from 30% to 20% to match Python
   
-  // Calculate NDVI
+  // Calculate NDVI (MATCHES Python: map then select)
   var ndviCollection = s2.map(function(img) {
     return img.normalizedDifference(['B8', 'B4']).rename('NDVI')
       .copyProperties(img, ['system:time_start']);
-  });
+  }).select('NDVI');
   
-  // Compute statistics
-  var ndviStats = ndviCollection.select('NDVI').reduce(
-    ee.Reducer.mean()
+  // Compute statistics (MATCHES Python: use median composite, then reduceRegion)
+  var ndviComposite = ndviCollection.median();
+  
+  var ndviStats = ndviComposite.reduceRegion({
+    reducer: ee.Reducer.mean()
       .combine(ee.Reducer.stdDev(), '', true)
       .combine(ee.Reducer.min(), '', true)
       .combine(ee.Reducer.max(), '', true)
-      .combine(ee.Reducer.percentile([25, 50, 75]), '', true)
-  );
-  
-  // Sample at point (50m buffer for stability)
-  var stats = ndviStats.reduceRegion({
-    reducer: ee.Reducer.mean(),
+      .combine(ee.Reducer.percentile([25, 50, 75]), '', true),
     geometry: point.buffer(50),
     scale: 10,
-    bestEffort: true
+    maxPixels: 1e9
   });
   
-  // Early season (Apr-May)
+  // Early season (Apr-May) - MATCHES Python: use median, not mean
   var earlyNDVI = ndviCollection
     .filterDate(CDL_YEAR + '-04-15', CDL_YEAR + '-06-01')
-    .mean()
+    .median()
     .reduceRegion({
       reducer: ee.Reducer.mean(),
       geometry: point.buffer(50),
       scale: 10,
-      bestEffort: true
+      maxPixels: 1e9
     });
   
-  // Late season (Jul-Aug)
+  // Late season (Jul-Aug) - MATCHES Python: use median, not mean
   var lateNDVI = ndviCollection
     .filterDate(CDL_YEAR + '-07-01', CDL_YEAR + '-08-31')
-    .mean()
+    .median()
     .reduceRegion({
       reducer: ee.Reducer.mean(),
       geometry: point.buffer(50),
       scale: 10,
-      bestEffort: true
+      maxPixels: 1e9
     });
   
-  // Get elevation
-  var elevation = ee.Image('USGS/SRTMGL1_003')
-    .reduceRegion({
-      reducer: ee.Reducer.mean(),
-      geometry: point,
-      scale: 30,
-      bestEffort: true
-    });
-  
-  // Get coordinates
-  var coords = point.coordinates();
+  // REMOVED: elevation and lat/lon (MATCHES Python - these features removed from model)
   
   return ee.Feature(point, {
-    ndvi_mean: stats.get('NDVI_mean'),
-    ndvi_std: stats.get('NDVI_stdDev'),
-    ndvi_min: stats.get('NDVI_min'),
-    ndvi_max: stats.get('NDVI_max'),
-    ndvi_p25: stats.get('NDVI_p25'),
-    ndvi_p50: stats.get('NDVI_p50'),
-    ndvi_p75: stats.get('NDVI_p75'),
+    ndvi_mean: ndviStats.get('NDVI_mean'),
+    ndvi_std: ndviStats.get('NDVI_stdDev'),
+    ndvi_min: ndviStats.get('NDVI_min'),
+    ndvi_max: ndviStats.get('NDVI_max'),
+    ndvi_p25: ndviStats.get('NDVI_p25'),
+    ndvi_p50: ndviStats.get('NDVI_p50'),
+    ndvi_p75: ndviStats.get('NDVI_p75'),
     ndvi_early: earlyNDVI.get('NDVI'),
-    ndvi_late: lateNDVI.get('NDVI'),
-    elevation_m: elevation.get('elevation'),
-    longitude: coords.get(0),
-    latitude: coords.get(1)
+    ndvi_late: lateNDVI.get('NDVI')
+    // REMOVED: elevation_m, longitude, latitude (match Python feature set)
   });
 }
 
@@ -376,7 +502,173 @@ function sampleCropFields(cropInfo) {
 }
 
 // ---------------------------------------------------------------
-// 7. PROCESS ALL CROPS AND TRACK DISTRIBUTION
+// 7. NON-CROP SAMPLING FUNCTION (MATCHES Python sample_non_crop_areas)
+// ---------------------------------------------------------------
+function sampleNonCropAreas(numFields, numSamplesPerField) {
+  print('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  print('🌍 OTHER (NON-CROP AREAS)');
+  print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  
+  var targetSamples = numFields * numSamplesPerField;
+  print('  🎯 Target:', targetSamples, 'samples for non-crop areas');
+  print('  📡 Strategy: Exclude all crop codes, sample from remaining areas');
+  
+  // Get all crop codes to exclude
+  var cropCodes = CROPS.map(function(crop) { return crop.code; });
+  print('  🚫 Excluding crop codes:', cropCodes);
+  
+  // Load CDL
+  var cdl = ee.Image('USDA/NASS/CDL/' + CDL_YEAR).select('cropland');
+  
+  // Create mask for crop areas (all crop codes combined)
+  var cropMask = ee.Image.constant(0);
+  for (var i = 0; i < cropCodes.length; i++) {
+    cropMask = cropMask.add(cdl.eq(cropCodes[i]));
+  }
+  cropMask = cropMask.gt(0);  // 1 where any crop exists, 0 elsewhere
+  
+  // Create buffer around crop areas to exclude edge cases
+  // Buffer distance in meters - ensures non-crop samples are clearly separated from crops
+  var bufferDistanceMeters = NON_CROP_BUFFER_METERS;
+  var cropBuffer = cropMask.focalMax({
+    radius: bufferDistanceMeters / 30,
+    units: 'pixels'
+  });
+  
+  // Create mask for non-crop areas (MATCHES Python logic)
+  // Build binary mask: 1 if pixel is NOT any crop code AND not in buffer zone
+  var nonCropBinary = ee.Image.constant(1);
+  for (var i = 0; i < cropCodes.length; i++) {
+    nonCropBinary = nonCropBinary.multiply(cdl.neq(cropCodes[i]));
+  }
+  // Exclude buffered areas around crops
+  nonCropBinary = nonCropBinary.multiply(cropBuffer.eq(0));
+  
+  // Apply mask: only pixels where binary = 1 (not any crop code and not in buffer)
+  var nonCropMask = cdl.updateMask(nonCropBinary.eq(1));
+  
+  print('  🛡️  Added ' + bufferDistanceMeters + 'm buffer around crop areas to avoid edge cases');
+  
+  // Get unique counties from all crops for diversity
+  var allCounties = [];
+  CROPS.forEach(function(crop) {
+    crop.counties.forEach(function(county) {
+      if (allCounties.indexOf(county) === -1) {
+        allCounties.push(county);
+      }
+    });
+  });
+  var uniqueCounties = allCounties.slice(0, 10);  // Use up to 10 counties
+  print('  📍 Sampling from', uniqueCounties.length, 'counties');
+  
+  var allSamples = ee.FeatureCollection([]);
+  var samplesCollected = 0;
+  
+  for (var i = 0; i < uniqueCounties.length && samplesCollected < targetSamples; i++) {
+    var countyGEOID = uniqueCounties[i];
+    var countyRegion = getCountyGeometry([countyGEOID]);
+    
+    var samplesNeeded = targetSamples - samplesCollected;
+    
+    // Sample from non-crop areas (1000x buffer - non-crop areas can be sparse)
+    var countySamples = nonCropMask.sample({
+      region: countyRegion,
+      scale: 30,
+      numPixels: samplesNeeded * 1000,  // 1000x buffer (matches Python)
+      seed: 999 + i,  // Different seed for 'Other' category
+      geometries: true,
+      tileScale: 16
+    });
+    
+    var countyCount = countySamples.size().getInfo();
+    
+    if (countyCount > 0) {
+      var samplesToAdd = countySamples.limit(samplesNeeded);
+      allSamples = allSamples.merge(samplesToAdd);
+      samplesCollected += Math.min(countyCount, samplesNeeded);
+      
+      if (i < 3) {  // Only print first 3
+        print('  📦 County', (i+1), '(GEOID:', countyGEOID + '):', 
+              Math.min(countyCount, samplesNeeded), 'samples');
+      }
+    }
+  }
+  
+  print('  ✅ Total collected:', samplesCollected, 'samples');
+  
+  // Add 'Other' category info
+  var finalSamples = allSamples.map(function(feature) {
+    return feature.set({
+      'crop': 'Other',
+      'crop_code': 0
+    });
+  });
+  
+  // Extract NDVI features for each sample
+  var allSamplesWithFeatures = finalSamples.map(function(feature) {
+    var point = feature.geometry();
+    var sampleWithFeatures = extractFeatures(point);
+    return sampleWithFeatures.copyProperties(feature);
+  });
+  
+  var sampleCount = finalSamples.size().getInfo();
+  
+  if (sampleCount === 0) {
+    print('  ❌ ERROR: Found 0 samples for non-crop areas');
+    print('      💡 SOLUTIONS:');
+    print('         1. Check if counties have non-crop areas');
+    print('         2. Increase numPixels buffer (currently 1000x)');
+    print('         3. Try different counties');
+    return ee.FeatureCollection([]);
+  }
+  
+  if (sampleCount < targetSamples) {
+    print('  ⚠️  Got', sampleCount, '/', targetSamples, 'samples');
+  } else {
+    print('  ✅ SUCCESS: Got full quota of', targetSamples, 'samples!');
+  }
+  
+  // Add visualization (gray color for 'Other' with larger, more visible markers)
+  if (sampleCount > 0) {
+    // Add main 'Other' samples layer with gray markers
+    Map.addLayer(
+      finalSamples.style({
+        color: '000000',  // Black border for visibility
+        pointSize: 18,    // Larger size to see clearly
+        pointShape: 'circle',  // Circle shape for 'Other'
+        width: 3,
+        fillColor: '808080'  // Gray fill
+      }),
+      {},
+      'Other (Non-Crop) Samples (' + sampleCount + ')',
+      true
+    );
+    
+    // Also add a layer with just outlines for better visibility
+    Map.addLayer(
+      finalSamples.style({
+        color: 'FF0000',  // Red outline
+        pointSize: 20,
+        pointShape: 'circle',
+        width: 2,
+        fillColor: '00000000'  // Transparent fill
+      }),
+      {},
+      'Other Samples (Outlines)',
+      false  // Hidden by default, can be toggled
+    );
+    
+    print('  📍 Added', sampleCount, '"Other" sample markers to map');
+    print('   • Gray circles = Non-crop sample locations');
+    print('   • Click markers to see coordinates');
+    print('   • Toggle "Other Samples (Outlines)" layer for red outlines');
+  }
+  
+  return allSamplesWithFeatures;
+}
+
+// ---------------------------------------------------------------
+// 8. PROCESS ALL CROPS AND TRACK DISTRIBUTION
 // ---------------------------------------------------------------
 var allTrainingData = ee.FeatureCollection([]);
 var sampleCounts = {};
@@ -390,8 +682,16 @@ CROPS.forEach(function(crop) {
   sampleCounts[crop.name] = count;
 });
 
+// Add 'Other' category if enabled (already defined in config section above)
+if (COLLECT_OTHER) {
+  var otherSamples = sampleNonCropAreas(NUM_OTHER_FIELDS, NUM_SAMPLES_PER_FIELD);
+  allTrainingData = allTrainingData.merge(otherSamples);
+  var otherCount = otherSamples.size().getInfo();
+  sampleCounts['Other'] = otherCount;
+}
+
 // ---------------------------------------------------------------
-// 8. DISPLAY SUMMARY TABLE
+// 9. DISPLAY SUMMARY TABLE
 // ---------------------------------------------------------------
 print('\n═══════════════════════════════════════');
 print('📊 SUMMARY - SAMPLE DISTRIBUTION');
@@ -404,9 +704,10 @@ var isBalanced = true;
 print('Total samples:', totalSamples);
 print('Target per crop:', targetPerCrop);
 print('');
-print('Crop           | Samples | Status');
+print('Category        | Samples | Status');
 print('─────────────────────────────────────');
 
+// Show all crops
 CROPS.forEach(function(crop) {
   var count = sampleCounts[crop.name] || 0;
   var status = '✅';
@@ -424,6 +725,25 @@ CROPS.forEach(function(crop) {
   print(name + '|' + countStr + ' | ' + status);
 });
 
+// Show 'Other' category if collected
+if (COLLECT_OTHER && sampleCounts['Other'] !== undefined) {
+  var otherCount = sampleCounts['Other'] || 0;
+  var otherStatus = '✅';
+  var otherTarget = NUM_OTHER_FIELDS * NUM_SAMPLES_PER_FIELD;
+  
+  if (otherCount === 0) {
+    otherStatus = '❌ FAILED';
+    isBalanced = false;
+  } else if (otherCount < otherTarget) {
+    otherStatus = '⚠️  LOW';
+    isBalanced = false;
+  }
+  
+  var otherName = ('Other            ').substring(0, 14);
+  var otherCountStr = ('       ' + otherCount).slice(-7);
+  print(otherName + '|' + otherCountStr + ' | ' + otherStatus);
+}
+
 print('');
 if (isBalanced) {
   print('✅ BALANCED: All crops have equal samples!');
@@ -438,102 +758,54 @@ if (isBalanced) {
 }
 
 print('');
+print('═══════════════════════════════════════');
+print('🗺️ VISUALIZATION GUIDE');
+print('═══════════════════════════════════════');
 print('Now check the map:');
 print('  • CDL layer shows actual crop types');
 print('  • Upside-down triangles (▼) show your sample points');
 print('  • Bottom tip of each triangle = exact sample location');
-print('  • Every sample is CDL-verified to be the correct crop');
-print('');
-
-// ---------------------------------------------------------------
-// 9. EXPORT DIRECTLY TO BIGQUERY
-// ---------------------------------------------------------------
-print('═══════════════════════════════════════');
-print('📤 EXPORT DIRECTLY TO BIGQUERY');
-print('═══════════════════════════════════════');
-
-// Your ML Pipeline Configuration
-var PROJECT_ID = 'ml-pipeline-477612';
-var DATASET_ID = 'crop_ml';
-var TABLE_ID = 'training_features';
-
-// Create field_id for each sample
-var allTrainingDataWithID = allTrainingData.map(function(feature) {
-  var coords = feature.geometry().coordinates();
-  var lon = ee.Number(coords.get(0)).format('%.5f');
-  var lat = ee.Number(coords.get(1)).format('%.5f');
-  var fieldId = ee.String('field_').cat(lon).cat('_').cat(lat);
-  
-  return feature.set('field_id', fieldId);
-});
-
-// Export directly to BigQuery (schema is auto-detected)
-Export.table.toBigQuery({
-  collection: allTrainingDataWithID,
-  description: 'crop_features_to_bigquery',
-  table: PROJECT_ID + '.' + DATASET_ID + '.' + TABLE_ID,  // Format: project.dataset.table
-  append: true,  // Add to existing table instead of overwriting
-  selectors: ['field_id', 'crop', 'crop_code',
-              'ndvi_mean', 'ndvi_std', 'ndvi_min', 'ndvi_max',
-              'ndvi_p25', 'ndvi_p50', 'ndvi_p75',
-              'ndvi_early', 'ndvi_late', 'elevation_m',
-              'longitude', 'latitude']
-});
-
-print('✅ Export task created: "crop_features_to_bigquery"');
-print('   Destination: ' + PROJECT_ID + '.' + DATASET_ID + '.' + TABLE_ID);
-print('   Mode: WRITE_APPEND (adds to existing data)');
-print('   Go to Tasks tab → Click RUN');
+print('  • Every sample is CDL-verified to be the correct crop/type');
+print('  • Gray triangles = "Other" (non-crop) samples');
 print('');
 
 print('═══════════════════════════════════════');
-print('💡 NEXT STEPS - ML PIPELINE');
+print('🔍 DEBUGGING INFORMATION');
 print('═══════════════════════════════════════');
-print('1. Click Tasks tab → Run "crop_features_to_bigquery"');
-print('2. Wait for export to complete (~2-5 minutes)');
-print('3. Verify data loaded in BigQuery:');
+print('This script matches earth_engine_collector.py exactly:');
+print('  ✅ Feature extraction: median composite, 20% cloud filter');
+print('  ✅ Sampling: same CDL verification logic');
+print('  ✅ Non-crop sampling: binary mask excluding all crop codes');
+print('  ✅ Feature set: 9 NDVI features (no elevation/lat/lon)');
 print('');
-print('bq query --use_legacy_sql=false \\');
-print('  "SELECT crop, COUNT(*) as count FROM ' + DATASET_ID + '.' + TABLE_ID + ' GROUP BY crop"');
+print('Use this script to:');
+print('  1. Visualize what the Python collector is doing');
+print('  2. Debug why non-crop sampling might fail');
+print('  3. Verify sample locations and distributions');
+print('  4. Test different counties or CDL years');
 print('');
-print('4. Trigger model retraining:');
+print('⚠️  NO EXPORT: This script only visualizes - no BigQuery export!');
+print('   Use earth_engine_collector.py for actual data collection.');
 print('');
-print('curl -X POST https://us-central1-' + PROJECT_ID + '.cloudfunctions.net/retrain-crop-model');
-print('');
-print('5. Monitor training logs:');
-print('gcloud functions logs read retrain-crop-model --region=us-central1 --limit=50');
-print('');
-print('🎯 BigQuery Schema (15 columns):');
-print('  • ID: field_id');
-print('  • Labels: crop, crop_code');
-print('  • Basic NDVI: mean, std, min, max');
-print('  • Percentiles: p25, p50, p75');
-print('  • Temporal: early_season, late_season');
-print('  • Location: lat, lon, elevation');
-print('');
-print('🔍 CDL VERIFICATION:');
-print('  • Each sample point is checked against CDL');
-print('  • Only samples matching the target crop are kept');
-print('  • Samples are spatially filtered using cropMask');
-print('  • 100% accurate training labels!');
-print('');
-print('☁️ ML PIPELINE:');
-print('  • Data exports directly to BigQuery (no intermediate GCS step)');
-print('  • Project:', PROJECT_ID);
-print('  • BigQuery table:', DATASET_ID + '.' + TABLE_ID);
-print('  • Mode: WRITE_APPEND (adds new data to existing table)');
-print('  • Cloud Function automatically trains when data is ready!');
-print('');
-print('📊 SAMPLE COUNT:');
-print('  • Per crop:', NUM_FIELDS_PER_CROP * NUM_SAMPLES_PER_FIELD, 'samples');
-print('  • Total:', (NUM_FIELDS_PER_CROP * NUM_SAMPLES_PER_FIELD * CROPS.length), 'samples');
-print('  • This meets the 100+ minimum for model training!');
-print('');
-print('🐛 TROUBLESHOOTING:');
+
+print('═══════════════════════════════════════');
+print('🐛 TROUBLESHOOTING');
+print('═══════════════════════════════════════');
 print('  • Auth error? Hard refresh (Ctrl+Shift+R)');
 print('  • 0 samples for a crop? Check CDL code or try different year');
-print('  • Unbalanced? All crops should have', (NUM_FIELDS_PER_CROP * NUM_SAMPLES_PER_FIELD), 'samples');
-print('  • Timeout? Reduce NUM_FIELDS_PER_CROP to 8');
-print('  • Schema error? Script now matches existing BigQuery table schema');
-print('  • Map layer error? Means that crop has 0 samples');
-print('  • Using top 10 counties per crop for maximum speed');
+print('  • 0 samples for "Other"? Non-crop areas might be sparse in these counties');
+print('  • Unbalanced? All categories should have', targetPerCrop, 'samples');
+print('  • Timeout? Reduce NUM_FIELDS_PER_CROP to 10');
+print('  • Map layer error? Means that category has 0 samples');
+print('  • Non-crop mask issue? Check if counties have enough non-crop pixels');
+print('');
+
+print('═══════════════════════════════════════');
+print('📊 FEATURE SET (9 features)');
+print('═══════════════════════════════════════');
+print('  • ndvi_mean, ndvi_std, ndvi_min, ndvi_max');
+print('  • ndvi_p25, ndvi_p50, ndvi_p75');
+print('  • ndvi_early, ndvi_late');
+print('  • REMOVED: elevation_m, longitude, latitude');
+print('  • (Matches Python feature set exactly)');
+print('');

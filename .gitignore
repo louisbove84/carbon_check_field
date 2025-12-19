@@ -71,6 +71,19 @@ ml_pipeline/.env
 ml_pipeline/*.log
 ml_pipeline/service-account.json
 
+# ML Pipeline - Test outputs and local model artifacts
+test_output/
+ml_pipeline/test_output/
+*.joblib
+*.pkl
+*.h5
+*.pb
+
 # Web configuration with API keys (generated from .env)
 web/config.js
+
+# Python virtual environment (root level)
+venv/
+__pycache__/
+*.pyc
 

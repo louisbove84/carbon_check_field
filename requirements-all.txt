@@ -1,0 +1,42 @@
+# Consolidated Requirements for Carbon Check Field
+# FOR LOCAL DEVELOPMENT ONLY
+# This file combines all requirements from:
+# - backend/requirements.txt (Cloud Run backend)
+# - ml_pipeline/requirements.txt (Cloud Function)
+# - ml_pipeline/orchestrator/requirements.txt (Cloud Run orchestrator)
+# - ml_pipeline/trainer/requirements.txt (Vertex AI training)
+# GCP DEPLOYMENT: Each service uses its own requirements.txt in its Dockerfile
+# LOCAL DEVELOPMENT: Use this file to install everything for local testing
+
+# Core dependencies
+PyYAML>=6.0.1
+numpy>=1.24.0,<2.0.0
+pandas>=2.0.0
+
+# Google Cloud SDK
+google-cloud-bigquery>=3.13.0
+google-cloud-storage>=2.10.0
+google-cloud-aiplatform>=1.38.0
+earthengine-api>=0.1.384
+google-auth>=2.27.0
+db-dtypes>=1.2.0
+
+# Backend API
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic>=2.9.0
+shapely>=2.0.0
+
+# ML Training
+scikit-learn>=1.3.0
+joblib>=1.3.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+tensorboard>=2.14.0
+torch>=2.0.0
+pillow>=10.0.0
+gcsfs>=2023.6.0
+
+# Web Server
+flask>=2.3.0
+gunicorn>=21.2.0

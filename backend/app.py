@@ -450,7 +450,7 @@ def predict_crop_type(features: List[float]) -> Tuple[str, float]:
         if not prediction.predictions:
             raise HTTPException(status_code=500, detail="No predictions returned")
         
-            pred = prediction.predictions[0]
+        pred = prediction.predictions[0]
         crop = None
         confidence = None  # No default - return None if not available
         
@@ -520,10 +520,10 @@ def predict_crop_type(features: List[float]) -> Tuple[str, float]:
                 crop = str(pred)
         elif isinstance(pred, str):
             # String format: "Corn"
-                crop = pred
-            else:
+            crop = pred
+        else:
             # Fallback
-                crop = str(pred)
+            crop = str(pred)
             
         # Ensure confidence is between 0 and 1 (only if we have a value)
         if confidence is not None:
@@ -550,6 +550,35 @@ def predict_crop_type(features: List[float]) -> Tuple[str, float]:
 # CARBON CREDIT CALCULATION
 # ============================================================================
 
+def validate_crop_prediction(crop: str) -> None:
+    """
+    Validate that the predicted crop is a valid crop type eligible for carbon credits.
+    Rejects 'Other' (non-crop) predictions to prevent carbon credit estimates for
+    parking lots, buildings, roads, etc.
+    
+    Args:
+        crop: Predicted crop type
+    
+    Raises:
+        HTTPException: If crop is 'Other' or not in valid crop list
+    """
+    valid_crops = list(CARBON_RATES.keys())
+    
+    if crop == "Other":
+        raise HTTPException(
+            status_code=400,
+            detail="The selected area appears to be non-crop land (buildings, roads, parking lots, etc.). "
+                   "Carbon credits are only available for agricultural cropland. "
+                   "Please select an area that contains crops."
+        )
+    
+    if crop not in valid_crops:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown crop type '{crop}'. Valid crops are: {', '.join(valid_crops)}"
+        )
+
+
 def calculate_carbon_income(crop: str, area_acres: float) -> dict:
     """
     Calculate estimated CO₂ income based on crop type and acreage.
@@ -560,8 +589,16 @@ def calculate_carbon_income(crop: str, area_acres: float) -> dict:
     
     Returns:
         Dict with min, max, and average income
+    
+    Note:
+        This function should only be called after validate_crop_prediction()
+        to ensure crop is valid and eligible for carbon credits.
     """
-    rates = CARBON_RATES.get(crop, DEFAULT_RATE)
+    # This should never happen if validation is called first, but add safety check
+    if crop == "Other" or crop not in CARBON_RATES:
+        raise ValueError(f"Invalid crop '{crop}' - cannot calculate carbon credits for non-crop areas")
+    
+    rates = CARBON_RATES[crop]
     
     return {
         "min": rates["min"] * area_acres,
@@ -830,6 +867,9 @@ async def analyze_field_single(coords: List[Tuple[float, float]], area_acres: fl
     # Predict crop type via Vertex AI
     crop, confidence = predict_crop_type(features)
     
+    # Validate prediction - reject non-crop areas (parking lots, buildings, etc.)
+    validate_crop_prediction(crop)
+    
     # Get CDL ground truth crop type
     cdl_crop = get_cdl_crop_type(coords, year)
     
@@ -899,6 +939,19 @@ async def analyze_field_grid(coords: List[Tuple[float, float]], area_acres: floa
                 # Predict crop type for this cell
                 crop, confidence = predict_crop_type(features)
                 
+                # Skip non-crop cells (parking lots, buildings, etc.) - don't include in results
+                if crop == "Other":
+                    print(f"Skipping non-crop cell (predicted: {crop})")
+                    continue
+                
+                # Validate crop is valid (should not happen if model is trained correctly)
+                try:
+                    validate_crop_prediction(crop)
+                except HTTPException:
+                    # Skip invalid crops
+                    print(f"Skipping invalid crop cell (predicted: {crop})")
+                    continue
+                
                 cell_results.append({
                     'crop': crop,
                     'confidence': confidence,
@@ -930,7 +983,14 @@ async def analyze_field_grid(coords: List[Tuple[float, float]], area_acres: floa
     total_co2_avg = 0
     
     for zone in zones:
-        income = calculate_carbon_income(zone['crop'], zone['area_acres'])
+        # Validate crop before calculating income (safety check - should already be filtered)
+        try:
+            validate_crop_prediction(zone['crop'])
+            income = calculate_carbon_income(zone['crop'], zone['area_acres'])
+        except HTTPException:
+            # Skip zones with invalid crops (shouldn't happen, but safety check)
+            print(f"Warning: Skipping zone with invalid crop '{zone['crop']}'")
+            continue
         co2_by_crop.append(CO2IncomeByCrop(
             crop=zone['crop'],
             min=round(income['min'], 2),

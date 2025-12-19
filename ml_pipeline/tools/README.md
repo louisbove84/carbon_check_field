@@ -4,6 +4,26 @@ This directory contains testing, evaluation, and utility tools for the ML pipeli
 
 ## Tools Overview
 
+### Data Verification Tools
+
+**`check_bigquery_other.py`** - Verify 'Other' category samples in BigQuery
+
+Quick script to check if non-crop ('Other') samples exist in the training data table.
+
+**Usage:**
+```bash
+python ml_pipeline/tools/check_bigquery_other.py
+```
+
+**`check_export_status.py`** - Check Earth Engine export task status
+
+Monitor recent Earth Engine export tasks and verify BigQuery table state.
+
+**Usage:**
+```bash
+python ml_pipeline/tools/check_export_status.py
+```
+
 ### Test Training
 
 **`test_training.py`** - Run a test training job locally with a small dataset
