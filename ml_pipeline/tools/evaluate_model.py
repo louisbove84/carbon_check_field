@@ -1,9 +1,19 @@
 """
-Standalone script to evaluate an existing trained model.
-This allows running comprehensive evaluation without retraining or data collection.
+Model Evaluation Script
+========================
+Evaluate an existing trained model without retraining.
+
+This script loads a pre-trained model (from GCS or local) and runs comprehensive
+evaluation including confusion matrices, per-crop metrics, feature importance, etc.
+
+Use this to:
+- Evaluate production models
+- Compare different model versions
+- Debug model performance
+- Generate evaluation reports
 
 Usage:
-    python local_evaluation.py [--model-path MODEL_PATH] [--output-dir OUTPUT_DIR]
+    python tools/evaluate_model.py [--model-path MODEL_PATH] [--output-dir OUTPUT_DIR]
 """
 
 import os
@@ -13,13 +23,15 @@ import logging
 import joblib
 import json
 import pandas as pd
+from pathlib import Path
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 
-# Add current directory to path
-sys.path.insert(0, os.path.dirname(__file__))
+# Add trainer directory to path so we can import modules
+trainer_dir = Path(__file__).parent.parent / 'trainer'
+sys.path.insert(0, str(trainer_dir))
 
-from tensorboard_utils import run_comprehensive_evaluation
+from tensorboard_logging import run_comprehensive_evaluation
 from feature_engineering import engineer_features_dataframe, compute_elevation_quantiles
 from torch.utils.tensorboard import SummaryWriter
 
@@ -190,6 +202,42 @@ def load_config_from_gcs(config_path, bucket_name):
     return config
 
 
+def evaluate_model_with_tensorboard(model, X_test, y_test, feature_names, writer, step=0, num_runs=1):
+    """
+    Reusable function to evaluate a model and log results to TensorBoard.
+    
+    This function can be used by both test_training.py and evaluate_model.py
+    to avoid code duplication.
+    
+    Args:
+        model: Trained sklearn model (Pipeline or classifier)
+        X_test: Test features (DataFrame or array)
+        y_test: Test labels (Series or array)
+        feature_names: List of feature names
+        writer: TensorBoard SummaryWriter
+        step: Step number for logging (default: 0)
+        num_runs: Number of evaluation runs to log (default: 1)
+    
+    Returns:
+        dict: Evaluation results from run_comprehensive_evaluation
+    """
+    logger.info("🔍 Running comprehensive evaluation...")
+    logger.info("")
+    
+    eval_results = run_comprehensive_evaluation(
+        model=model,
+        X_test=X_test,
+        y_test=y_test,
+        feature_names=feature_names,
+        writer=writer,
+        step=step,
+        num_runs=num_runs
+    )
+    
+    logger.info("✅ Evaluation complete")
+    return eval_results
+
+
 
 
 def main():
@@ -199,16 +247,16 @@ def main():
         epilog="""
 Examples:
   # Evaluate latest model from GCS
-  python local_evaluation.py --model-path models/crop_classifier_latest --output-dir ./evaluation_results
+  python scripts/evaluate_model.py --model-path models/crop_classifier_latest --output-dir ./evaluation_results
 
   # Evaluate specific archived model
-  python local_evaluation.py --model-path models/crop_classifier_archive/crop_classifier_20251205_2255
+  python scripts/evaluate_model.py --model-path models/crop_classifier_archive/crop_classifier_20251205_2255
 
   # Evaluate local model
-  python local_evaluation.py --model-path ./local_model --output-dir ./results
+  python scripts/evaluate_model.py --model-path ./local_model --local --output-dir ./results
 
   # Use custom test data
-  python local_evaluation.py --model-path models/crop_classifier_latest --test-data ./test_data.csv
+  python scripts/evaluate_model.py --model-path models/crop_classifier_latest --test-data ./test_data.csv
         """
     )
     
@@ -406,11 +454,8 @@ Examples:
         os.makedirs(tensorboard_log_dir, exist_ok=True)
         writer = SummaryWriter(log_dir=tensorboard_log_dir)
         
-        # Run comprehensive evaluation (logs everything to TensorBoard)
-        logger.info("🔍 Running comprehensive evaluation...")
-        logger.info("")
-        
-        eval_results = run_comprehensive_evaluation(
+        # Run comprehensive evaluation using shared function
+        eval_results = evaluate_model_with_tensorboard(
             model=model,
             X_test=X_test,
             y_test=y_test,

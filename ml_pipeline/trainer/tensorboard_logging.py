@@ -1,10 +1,15 @@
 """
-SIMPLIFIED TensorBoard utilities
-=================================
-Fixes:
-1. Single, simple image conversion method
-2. No excessive flushes
-3. Cleaner logging flow
+TensorBoard Logging Module
+==========================
+Functions for logging model evaluation metrics and visualizations to TensorBoard.
+
+All functions in this module are focused on logging to TensorBoard:
+- Confusion matrices
+- Per-crop metrics
+- Feature importance
+- Misclassification analysis
+- Advanced metrics
+- Training metrics
 """
 
 import os
@@ -155,19 +160,17 @@ def log_advanced_metrics_to_tensorboard(writer, y_test, y_pred, step=0):
 
 def log_training_metrics_to_tensorboard(writer, config, metrics, y_test, y_pred):
     """Log basic training metrics to TensorBoard."""
-    # Log accuracy
+    # Log accuracy as scalars (more reliable than add_hparams)
     writer.add_scalar('training/train_accuracy', metrics['train_accuracy'], 0)
     writer.add_scalar('training/test_accuracy', metrics['test_accuracy'], 0)
     
-    # Log hyperparameters
-    hparams = {
-        'n_estimators': config.get('training', {}).get('n_estimators', 100),
-        'max_depth': config.get('training', {}).get('max_depth', 15),
-        'n_train_samples': metrics['n_train_samples'],
-        'n_test_samples': metrics['n_test_samples']
-    }
-    
-    writer.add_hparams(hparams, {'accuracy': metrics['test_accuracy']})
+    # Log hyperparameters as scalars (avoid add_hparams which creates timestamp subdirectories)
+    hparams = config.get('model', {}).get('hyperparameters', {})
+    writer.add_scalar('hyperparameters/n_estimators', hparams.get('n_estimators', 100), 0)
+    writer.add_scalar('hyperparameters/max_depth', hparams.get('max_depth', 10), 0)
+    writer.add_scalar('hyperparameters/min_samples_split', hparams.get('min_samples_split', 5), 0)
+    writer.add_scalar('data/n_train_samples', metrics['n_train_samples'], 0)
+    writer.add_scalar('data/n_test_samples', metrics['n_test_samples'], 0)
     
     logger.info("✅ Logged training metrics")
 

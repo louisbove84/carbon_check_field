@@ -25,9 +25,6 @@ torch>=2.0.0  # For SummaryWriter
 pillow>=10.0.0  # For image handling
 gcsfs>=2023.6.0  # For TensorBoard GCS access
 
-# MLflow (for experiment tracking and artifact logging)
-mlflow>=2.8.0
-
 # Configuration
 PyYAML>=6.0.1
 

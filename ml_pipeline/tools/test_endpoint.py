@@ -5,11 +5,20 @@ Tests the deployed crop classification model.
 """
 
 import json
+import sys
+import os
+from pathlib import Path
 from google.cloud import aiplatform, bigquery
 import pandas as pd
+import yaml
 
-# Import centralized configuration
-from config import PROJECT_ID, REGION
+# Load config from parent directory
+config_path = Path(__file__).parent.parent / 'orchestrator' / 'config.yaml'
+with open(config_path, 'r') as f:
+    config = yaml.safe_load(f)
+
+PROJECT_ID = config['project']['id']
+REGION = config['project']['region']
 
 # Configuration
 ENDPOINT_ID = "2450616804754587648"  # Your current endpoint ID

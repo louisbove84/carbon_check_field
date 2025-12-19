@@ -220,6 +220,50 @@ def export_earth_engine_data():
         }
 
 
+def upload_training_code(vertex_bucket, timestamp):
+    """
+    Upload training code to GCS for dynamic code mounting.
+    This allows code changes without Docker rebuilds!
+    """
+    import os
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(vertex_bucket)
+    
+    # Get the directory where this script is located
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    ml_pipeline_dir = os.path.dirname(script_dir)  # Go up one level from orchestrator/
+    
+    code_files = [
+        'trainer/vertex_ai_training.py',
+        'trainer/feature_engineering.py',
+        'trainer/tensorboard_logging.py',
+        'trainer/visualization_utils.py'
+    ]
+    
+    code_uri = f"gs://{vertex_bucket}/code/{timestamp}"
+    logger.info(f"   📤 Uploading training code to {code_uri}")
+    
+    uploaded_count = 0
+    for file_path in code_files:
+        full_path = os.path.join(ml_pipeline_dir, file_path)
+        if not os.path.exists(full_path):
+            logger.warning(f"   ⚠️  {file_path} not found, skipping")
+            continue
+        
+        blob_path = f"code/{timestamp}/{os.path.basename(file_path)}"
+        blob = bucket.blob(blob_path)
+        blob.upload_from_filename(full_path)
+        logger.info(f"   ✅ {os.path.basename(file_path)}")
+        uploaded_count += 1
+    
+    if uploaded_count > 0:
+        logger.info(f"   ✅ Uploaded {uploaded_count} code files")
+    else:
+        logger.warning("   ⚠️  No code files uploaded")
+    
+    return code_uri
+
+
 def trigger_training_job():
     """
     Trigger Vertex AI Custom Training Job.
@@ -241,6 +285,10 @@ def trigger_training_job():
         # Use regional bucket for Vertex AI (required)
         vertex_bucket = f'{project_id}-training'
         
+        # Upload training code dynamically (allows code changes without Docker rebuild)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        code_uri = upload_training_code(vertex_bucket, timestamp)
+        
         # Initialize Vertex AI
         aiplatform.init(
             project=project_id, 
@@ -256,24 +304,51 @@ def trigger_training_job():
         )
         
         # Get TensorBoard instance resource name from config
-        tensorboard_id = config.get('tensorboard', {}).get('instance_id', '8764605208211750912')
-        tensorboard_name = f'projects/{project_id}/locations/{region}/tensorboards/{tensorboard_id}'
+        # CRITICAL: Use numeric project ID (not string project ID) for TensorBoard resource name
+        project_number = '303566498201'  # Numeric project ID
+        tensorboard_id = config.get('tensorboard', {}).get('instance_id')
+        
+        if not tensorboard_id:
+            logger.warning("   ⚠️  No TensorBoard instance ID in config, training will run without TensorBoard")
+            tensorboard_name = None
+        else:
+            tensorboard_name = f'projects/{project_number}/locations/{region}/tensorboards/{tensorboard_id}'
         
         # Service account for training job
         service_account = f'ml-pipeline-sa@{project_id}.iam.gserviceaccount.com'
         
+        # Generate experiment name for TensorBoard
+        experiment_name = f'crop_training_{datetime.now().strftime("%Y%m%d")}'
+        
+        # Environment variables for TensorBoard integration and code mounting
+        env_vars = {
+            'AIP_TENSORBOARD_EXPERIMENT_NAME': experiment_name,
+            'AIP_TRAINING_DATA_URI': code_uri  # Tell entrypoint.sh where to download code
+        }
+        
         # Run training job with TensorBoard
         logger.info("   Starting training job on Vertex AI...")
-        logger.info(f"   TensorBoard ID: {tensorboard_id}")
+        if tensorboard_name:
+            logger.info(f"   TensorBoard ID: {tensorboard_id}")
+            logger.info(f"   TensorBoard Resource: {tensorboard_name}")
+        logger.info(f"   Experiment Name: {experiment_name}")
+        logger.info(f"   Code URI: {code_uri}")
         logger.info(f"   Service account: {service_account}")
-        model = job.run(
-            replica_count=1,
-            machine_type=machine_type,
-            accelerator_count=0,
-            base_output_dir=f'gs://{vertex_bucket}/training_output',
-            tensorboard=tensorboard_name,
-            service_account=service_account
-        )
+        
+        run_params = {
+            'replica_count': 1,
+            'machine_type': machine_type,
+            'accelerator_count': 0,
+            'base_output_dir': f'gs://{vertex_bucket}/training_output',
+            'service_account': service_account,
+            'environment_variables': env_vars
+        }
+        
+        # Only add tensorboard parameter if TensorBoard instance exists
+        if tensorboard_name:
+            run_params['tensorboard'] = tensorboard_name
+        
+        model = job.run(**run_params)
         
         logger.info("   ✅ Training job complete")
         

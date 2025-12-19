@@ -5,9 +5,14 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install system dependencies
+# Note: matplotlib requires these libraries for image rendering (critical for TensorBoard)
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
+    libpng-dev \
+    libfreetype6-dev \
+    libjpeg-dev \
+    zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy and install Python dependencies ONLY

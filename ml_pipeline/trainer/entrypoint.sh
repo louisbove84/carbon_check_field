@@ -46,6 +46,13 @@ echo ""
 echo "📂 Files in /app/:"
 ls -lh /app/*.py 2>/dev/null || echo "   No .py files found!"
 
+# Clear Python cache to ensure new code is used
+echo ""
+echo "🧹 Clearing Python cache..."
+find /app -type d -name __pycache__ -exec rm -r {} + 2>/dev/null || true
+find /app -name "*.pyc" -delete 2>/dev/null || true
+echo "   ✅ Cache cleared"
+
 echo ""
 echo "🎯 Starting training script..."
 echo "========================================"

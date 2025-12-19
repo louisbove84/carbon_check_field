@@ -27,7 +27,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 # Import local modules (all files are in /app)
 from feature_engineering import engineer_features_dataframe
-from tensorboard_utils import run_comprehensive_evaluation, log_training_metrics_to_tensorboard
+from tensorboard_logging import run_comprehensive_evaluation, log_training_metrics_to_tensorboard
 
 # Configure logging
 logging.basicConfig(
@@ -192,9 +192,45 @@ def save_model(pipeline, feature_cols, metrics, config):
 
 
 if __name__ == '__main__':
+    # CRITICAL: Clear Python cache to ensure we're using the latest code
+    import sys
+    import importlib
+    import shutil
+    
+    cache_dirs = ['/app/__pycache__', '/tmp/__pycache__']
+    for cache_dir in cache_dirs:
+        if os.path.exists(cache_dir):
+            try:
+                shutil.rmtree(cache_dir)
+                print(f"🧹 Cleared Python cache: {cache_dir}")
+            except Exception as e:
+                print(f"⚠️  Could not clear cache {cache_dir}: {e}")
+    
+    # Force reload modules to ensure latest code (after logger is configured)
+    # Note: We'll reload after logger setup
+    
     logger.info("=" * 70)
     logger.info("🎯 VERTEX AI TRAINING (SIMPLIFIED)")
     logger.info("=" * 70)
+    
+    # CRITICAL: Log environment variables to debug TensorBoard path issues
+    logger.info("🔍 Environment Variables:")
+    logger.info(f"   AIP_MODEL_DIR: {os.environ.get('AIP_MODEL_DIR', 'NOT SET')}")
+    logger.info(f"   AIP_TENSORBOARD_LOG_DIR: {os.environ.get('AIP_TENSORBOARD_LOG_DIR', 'NOT SET')}")
+    logger.info(f"   AIP_TENSORBOARD_EXPERIMENT_NAME: {os.environ.get('AIP_TENSORBOARD_EXPERIMENT_NAME', 'NOT SET')}")
+    logger.info("")
+    logger.info("⚠️  CRITICAL: TensorBoard logs MUST be written to /tmp, NOT AIP_MODEL_DIR")
+    logger.info("")
+    
+    # Force reload modules to ensure latest code (now that logger is ready)
+    modules_to_reload = ['tensorboard_logging', 'feature_engineering', 'visualization_utils']
+    for mod_name in modules_to_reload:
+        if mod_name in sys.modules:
+            try:
+                importlib.reload(sys.modules[mod_name])
+                logger.info(f"🔄 Reloaded module: {mod_name}")
+            except Exception as e:
+                logger.warning(f"⚠️  Could not reload {mod_name}: {e}")
     
     start_time = datetime.now()
     
@@ -216,40 +252,76 @@ if __name__ == '__main__':
         pipeline, metrics, X_test, y_test, y_pred = train_model(df_enhanced, feature_cols, config)
         
         # === TENSORBOARD LOGGING ===
-        # Following the official GCP guide for Vertex AI TensorBoard integration
-        # KEY INSIGHT: Vertex AI automatically syncs logs from a LOCAL directory
-        # to the managed TensorBoard bucket when tensorboard= is set in the training job
+        # CRITICAL: SummaryWriter cannot write directly to GCS paths
+        # Solution: Write to local directory, then upload to AIP_TENSORBOARD_LOG_DIR
         
-        # Check if AIP_TENSORBOARD_LOG_DIR is set (it should be for managed TensorBoard)
-        managed_tb_dir = os.environ.get('AIP_TENSORBOARD_LOG_DIR')
+        # Get the GCS destination from Vertex AI
+        managed_tb_gcs_dir = os.environ.get('AIP_TENSORBOARD_LOG_DIR')
         
-        # CRITICAL: Write to a SIMPLE local directory structure
-        # Vertex AI will automatically sync this to the managed bucket
-        # Structure: /tmp/tensorboard/ (flat, no subdirectories needed)
-        local_tb_dir = '/tmp/tensorboard'
+        # Create a unique run directory for this training run
+        # SummaryWriter works best with a dedicated directory per run
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_name = f'run_{timestamp}'
+        local_tb_base = '/tmp/tensorboard_logs'
+        local_tb_dir = os.path.join(local_tb_base, run_name)
         os.makedirs(local_tb_dir, exist_ok=True)
         
         logger.info(f"📊 TensorBoard Configuration:")
-        logger.info(f"   AIP_TENSORBOARD_LOG_DIR: {managed_tb_dir if managed_tb_dir else 'NOT SET'}")
-        logger.info(f"   Local directory: {local_tb_dir}")
-        logger.info(f"   Vertex AI will auto-sync logs to managed TensorBoard bucket")
+        if managed_tb_gcs_dir:
+            logger.info(f"   AIP_TENSORBOARD_LOG_DIR (GCS): {managed_tb_gcs_dir}")
+            logger.info(f"   Local write directory: {local_tb_dir}")
+            logger.info(f"   Run name: {run_name}")
+            logger.info(f"   Will upload to GCS after logging completes")
+        else:
+            logger.warning(f"⚠️  AIP_TENSORBOARD_LOG_DIR not set")
+            logger.info(f"   Writing to local: {local_tb_dir}")
         
-        # Create writer pointing to LOCAL directory (Vertex AI handles the rest)
+        # Create writer pointing to LOCAL directory (SummaryWriter needs local filesystem)
+        # Use the run-specific directory
+        # CRITICAL: Ensure we're NOT using AIP_MODEL_DIR or any GCS path
+        aip_model_dir = os.environ.get('AIP_MODEL_DIR', '')
+        if aip_model_dir and aip_model_dir in local_tb_dir:
+            raise ValueError(f"ERROR: TensorBoard log_dir cannot use AIP_MODEL_DIR! Got: {local_tb_dir}")
+        
+        assert not local_tb_dir.startswith('gs://'), f"ERROR: TensorBoard log_dir cannot be a GCS path: {local_tb_dir}"
+        assert '/tmp' in local_tb_dir, f"ERROR: TensorBoard must write to /tmp, not: {local_tb_dir}"
+        assert 'model' not in local_tb_dir.lower(), f"ERROR: TensorBoard log_dir cannot contain 'model': {local_tb_dir}"
+        
+        logger.info(f"🔒 Safety checks passed:")
+        logger.info(f"   ✅ Not using AIP_MODEL_DIR")
+        logger.info(f"   ✅ Not a GCS path")
+        logger.info(f"   ✅ Writing to /tmp")
+        
         writer = SummaryWriter(log_dir=local_tb_dir)
+        logger.info(f"✅ SummaryWriter created for: {local_tb_dir}")
+        logger.info(f"   Verified: Local filesystem path (not GCS, not AIP_MODEL_DIR)")
         
         # CRITICAL: Initialize Vertex AI Experiments to register in UI
         experiment_name = os.environ.get('AIP_TENSORBOARD_EXPERIMENT_NAME', 'crop_training')
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        run_name = f'run_{timestamp}'
+        # Use the same run_name we created for TensorBoard directory
+        
+        # Get TensorBoard instance ID from config
+        project_number = '303566498201'  # Numeric project ID
+        tensorboard_id = config.get('tensorboard', {}).get('instance_id')
+        
+        if tensorboard_id:
+            tensorboard_resource = f'projects/{project_number}/locations/{config["project"]["region"]}/tensorboards/{tensorboard_id}'
+            logger.info(f"🔗 Linking to TensorBoard instance: {tensorboard_id}")
+        else:
+            tensorboard_resource = None
+            logger.warning("⚠️  No TensorBoard instance ID in config")
         
         try:
             logger.info(f"🔗 Initializing Vertex AI Experiment: {experiment_name}")
-            aiplatform.init(
-                project=config['project']['id'],
-                location=config['project']['region'],
-                experiment=experiment_name,
-                experiment_tensorboard='projects/303566498201/locations/us-central1/tensorboards/3503556418512879616'
-            )
+            init_params = {
+                'project': config['project']['id'],
+                'location': config['project']['region'],
+                'experiment': experiment_name
+            }
+            if tensorboard_resource:
+                init_params['experiment_tensorboard'] = tensorboard_resource
+            
+            aiplatform.init(**init_params)
             
             # Start run - this creates it in the Experiments UI
             aiplatform.start_run(run=run_name)
@@ -305,25 +377,114 @@ if __name__ == '__main__':
         logger.info("✅ TensorBoard writer closed")
         
         # DEBUG: Check what files were created locally
-        logger.info(f"🔍 Checking local TensorBoard files in {local_tb_dir}")
+        # SummaryWriter may create subdirectories, so we need to check recursively
+        logger.info(f"🔍 Checking TensorBoard files in {local_tb_dir}")
+        logger.info(f"   Directory exists: {os.path.exists(local_tb_dir)}")
+        logger.info(f"   Is directory: {os.path.isdir(local_tb_dir) if os.path.exists(local_tb_dir) else False}")
+        
         local_files = []
-        for root, dirs, files in os.walk(local_tb_dir):
-            for file in files:
-                file_path = os.path.join(root, file)
-                size = os.path.getsize(file_path)
-                local_files.append((file, size))
-                logger.info(f"   📄 {file}: {size:,} bytes")
+        if os.path.exists(local_tb_dir) and os.path.isdir(local_tb_dir):
+            # List all contents first
+            try:
+                all_items = os.listdir(local_tb_dir)
+                logger.info(f"   Directory contents: {all_items}")
+            except Exception as e:
+                logger.warning(f"   Could not list directory: {e}")
+            
+            # Walk recursively to find all files
+            for root, dirs, files in os.walk(local_tb_dir):
+                logger.info(f"   Walking: {root} (dirs: {dirs}, files: {files})")
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    if os.path.exists(file_path):
+                        try:
+                            size = os.path.getsize(file_path)
+                            rel_path = os.path.relpath(file_path, local_tb_dir)
+                            local_files.append((rel_path, size))
+                            logger.info(f"   📄 {rel_path}: {size:,} bytes")
+                        except Exception as e:
+                            logger.warning(f"   Could not get size for {file_path}: {e}")
         
         if not local_files:
-            logger.error("❌ No TensorBoard files were created!")
+            logger.error("❌ No TensorBoard files found in local directory!")
+            logger.error(f"   Checked: {local_tb_dir}")
+            logger.error("   This means SummaryWriter did not create any event files")
         else:
-            logger.info(f"✅ TensorBoard files created: {len(local_files)} files")
-            logger.info("ℹ️  Vertex AI Experiments will automatically sync these logs")
-            
-            # Give Vertex AI time to sync files before job ends
-            logger.info("⏳ Waiting 15 seconds for Vertex AI to sync files...")
-            time.sleep(15)
-            logger.info("✅ Sync delay complete")
+            logger.info(f"✅ TensorBoard files created locally: {len(local_files)} files")
+            total_size = sum(size for _, size in local_files)
+            logger.info(f"   Total size: {total_size:,} bytes")
+        
+        # CRITICAL: Upload local TensorBoard logs to AIP_TENSORBOARD_LOG_DIR
+        # Vertex AI automatically syncs from this location to TensorBoard UI
+        # Structure: gs://bucket/training_output/logs/run_TIMESTAMP/events.out.tfevents...
+        if managed_tb_gcs_dir and local_files:
+            logger.info(f"📤 Uploading TensorBoard logs to GCS")
+            logger.info(f"   Source: {local_tb_dir}")
+            logger.info(f"   Destination: {managed_tb_gcs_dir}/{run_name}/")
+            try:
+                from google.cloud import storage
+                
+                # Parse GCS path: gs://bucket/path/to/logs/
+                if managed_tb_gcs_dir.startswith('gs://'):
+                    gcs_path = managed_tb_gcs_dir.replace('gs://', '')
+                    parts = gcs_path.split('/', 1)
+                    bucket_name = parts[0]
+                    gcs_prefix = parts[1].rstrip('/') if len(parts) > 1 else ''  # Remove trailing slash
+                    
+                    storage_client = storage.Client()
+                    bucket = storage_client.bucket(bucket_name)
+                    
+                    # Upload all files from local_tb_dir (the run-specific directory)
+                    # Upload to: gs://bucket/prefix/run_name/...
+                    # This preserves the directory structure TensorBoard expects
+                    uploaded_count = 0
+                    uploaded_files = []
+                    
+                    for root, dirs, files in os.walk(local_tb_dir):
+                        for file in files:
+                            local_path = os.path.join(root, file)
+                            # Get relative path from local_tb_dir (preserves subdirectories created by SummaryWriter/hparams)
+                            rel_path = os.path.relpath(local_path, local_tb_dir)
+                            # Construct GCS path: prefix/run_name/relative_path
+                            # Remove any leading slashes or dots
+                            rel_path = rel_path.lstrip('./').replace('\\', '/')
+                            if gcs_prefix:
+                                blob_path = f"{gcs_prefix}/{run_name}/{rel_path}"
+                            else:
+                                blob_path = f"{run_name}/{rel_path}"
+                            
+                            blob = bucket.blob(blob_path)
+                            blob.upload_from_filename(local_path)
+                            uploaded_count += 1
+                            uploaded_files.append(blob_path)
+                            logger.info(f"   ✅ {rel_path} -> {blob_path}")
+                    
+                    logger.info("")
+                    logger.info(f"✅ Uploaded {uploaded_count} TensorBoard files to GCS")
+                    logger.info(f"   GCS location: gs://{bucket_name}/{gcs_prefix}/{run_name}/")
+                    logger.info(f"   Files uploaded:")
+                    for f in uploaded_files[:5]:  # Show first 5 files
+                        logger.info(f"      - {f}")
+                    if len(uploaded_files) > 5:
+                        logger.info(f"      ... and {len(uploaded_files) - 5} more")
+                    logger.info("")
+                    logger.info("   ⏳ Vertex AI will automatically sync these logs to TensorBoard")
+                    logger.info(f"   📊 View in TensorBoard: {managed_tb_gcs_dir}/{run_name}/")
+                else:
+                    logger.warning(f"⚠️  Invalid GCS path format: {managed_tb_gcs_dir}")
+            except Exception as e:
+                logger.error(f"❌ Failed to upload TensorBoard logs to GCS: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+        elif not managed_tb_gcs_dir:
+            logger.warning("⚠️  AIP_TENSORBOARD_LOG_DIR not set - logs will not be synced to TensorBoard")
+        elif not local_files:
+            logger.error("❌ No TensorBoard files to upload - SummaryWriter did not create any files!")
+        
+        # Give Vertex AI time to sync files before job ends
+        logger.info("⏳ Waiting 10 seconds for Vertex AI to sync files...")
+        time.sleep(10)
+        logger.info("✅ Sync delay complete")
         
         # Save model
         save_model(pipeline, feature_cols, metrics, config)

@@ -1,6 +1,18 @@
 #!/bin/bash
 # Build and Push Trainer Container to Artifact Registry
 # ======================================================
+#
+# This script builds the Docker container used by Vertex AI Custom Training Jobs.
+#
+# When to rebuild:
+#   ✅ Dockerfile changes (system libraries, base image, etc.)
+#   ✅ requirements.txt changes (new Python packages)
+#   ✅ entrypoint.sh changes
+#   ❌ Python code changes (code is downloaded at runtime from GCS)
+#
+# Usage:
+#   cd ml_pipeline/trainer
+#   ./build_docker.sh
 
 set -e
 
