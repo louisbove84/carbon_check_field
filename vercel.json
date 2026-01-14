@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "buildCommand": "echo \"Using prebuilt Flutter web build\"",
+  "outputDirectory": "build/web",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "/api/:path*"
+    },
+    {
+      "source": "/:path*",
+      "destination": "/index.html"
+    }
+  ]
+}

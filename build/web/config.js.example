@@ -1,0 +1,6 @@
+// CarbonCheck Field - Web Configuration Template
+// ===============================================
+// Copy this to config.js and fill in your actual API key
+// Or use a build script to generate from .env
+
+var GOOGLE_MAPS_API_KEY = 'YOUR_GOOGLE_MAPS_API_KEY_HERE';
