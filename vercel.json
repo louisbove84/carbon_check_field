@@ -1,15 +1,23 @@
 {
   "version": 2,
-  "buildCommand": "echo \"Using prebuilt Flutter web build\"",
-  "outputDirectory": "build/web",
-  "rewrites": [
+  "builds": [
     {
-      "source": "/api/:path*",
-      "destination": "/api/:path*"
+      "src": "api/**/*.js",
+      "use": "@vercel/node"
     },
     {
-      "source": "/:path*",
-      "destination": "/index.html"
+      "src": "build/web/**",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/build/web/index.html"
     }
   ]
 }
