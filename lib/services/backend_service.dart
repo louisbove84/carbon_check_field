@@ -6,6 +6,7 @@
 /// - Error handling and retries
 
 import 'dart:convert';
+import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:carbon_check_field/models/field_data.dart';
@@ -92,12 +93,14 @@ class BackendService {
       
       try {
         final url = Uri.parse('$backendUrl$endpoint');
+        final requestId = '${DateTime.now().millisecondsSinceEpoch}-${Random().nextInt(100000)}';
         
         final response = await http.post(
           url,
           headers: {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer $idToken',
+            'X-Request-Id': requestId,
           },
           body: json.encode(body),
         ).timeout(
@@ -114,6 +117,9 @@ class BackendService {
           await Future.delayed(Duration(seconds: retryDelay * attempts));
           continue;
         } else {
+          // Log for troubleshooting (shows up in browser console for web)
+          // ignore: avoid_print
+          print('API error ${response.statusCode} body=${response.body}');
           throw Exception('API error (${response.statusCode}): ${response.body}');
         }
       } on http.ClientException catch (e) {

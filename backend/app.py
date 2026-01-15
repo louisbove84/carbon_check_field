@@ -31,6 +31,9 @@ from shapely.geometry import Polygon, Point, box
 from shapely.ops import unary_union
 import sys
 import json
+import time
+import traceback
+import uuid
 
 # Add feature modules to path (prefer local copies for Cloud Run)
 _base_dir = os.path.dirname(__file__)
@@ -82,6 +85,24 @@ app = FastAPI(
     description="Secure backend for crop classification and carbon credit estimation",
     version="1.0.0"
 )
+
+# Request logging with correlation id
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
+    start_time = time.time()
+    response = None
+    try:
+        response = await call_next(request)
+        return response
+    finally:
+        duration_ms = int((time.time() - start_time) * 1000)
+        origin = request.headers.get("origin")
+        status = response.status_code if response else 500
+        print(
+            f"[{request_id}] {request.method} {request.url.path} "
+            f"status={status} duration_ms={duration_ms} origin={origin}"
+        )
 
 # CORS - Allow Flutter app to call this API
 # Note: When allow_credentials=True, cannot use allow_origins=["*"]
@@ -828,7 +849,8 @@ async def health_check():
 @app.post("/analyze", response_model=AnalyzeFieldResponse)
 async def analyze_field(
     request: AnalyzeFieldRequest,
-    user: dict = Depends(verify_firebase_token)
+    user: dict = Depends(verify_firebase_token),
+    req: Request = None,
 ):
     """
     Analyze a farm field and return crop prediction + CO₂ income estimate.
@@ -846,12 +868,19 @@ async def analyze_field(
     - Area in acres
     - CO₂ income estimates (min, max, avg)
     """
+    request_id = req.headers.get("x-request-id") if req else None
+    user_id = user.get("uid") if isinstance(user, dict) else None
     try:
+        print(
+            f"[{request_id}] analyze start uid={user_id} "
+            f"points={len(request.polygon)} year={request.year}"
+        )
         # Convert polygon to (lng, lat) tuples
         coords = [(point.lng, point.lat) for point in request.polygon]
         
         # Calculate area
         area_acres = calculate_polygon_area_acres(coords)
+        print(f"[{request_id}] analyze area_acres={area_acres:.2f}")
         
         # Validate field size
         if area_acres < 0.1:
@@ -868,16 +897,21 @@ async def analyze_field(
         # Choose analysis method based on field size
         if area_acres < MIN_FIELD_SIZE_FOR_GRID:
             # Small field: use single prediction (fast)
-            return await analyze_field_single(coords, area_acres, request.year)
+            result = await analyze_field_single(coords, area_acres, request.year)
+            print(f"[{request_id}] analyze complete mode=single")
+            return result
         else:
             # Large field: use grid-based classification (detailed)
-            return await analyze_field_grid(coords, area_acres, request.year)
+            result = await analyze_field_grid(coords, area_acres, request.year)
+            print(f"[{request_id}] analyze complete mode=grid")
+            return result
 
     
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Error in analyze_field: {e}")
+        print(f"[{request_id}] Error in analyze_field: {e}")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 
