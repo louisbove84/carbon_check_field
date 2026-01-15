@@ -14,7 +14,7 @@ Features:
 Author: CarbonCheck Team
 """
 
-from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi import FastAPI, HTTPException, Depends, Header, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Tuple, Optional, Dict
@@ -97,11 +97,24 @@ app.add_middleware(
         "https://www.beuxbunk.com",
         # Add any additional production domains here
     ],
+    allow_origin_regex=r"https?://.*\.beuxbunk\.com$|https?://.*\.vercel\.app$",
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["*"],
 )
+
+# Handle preflight across all routes (defensive against 405s)
+@app.options("/{path:path}")
+async def options_handler(request: Request) -> Response:
+    origin = request.headers.get("origin")
+    response = Response(status_code=204)
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "authorization, content-type"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response
 
 # Initialize Earth Engine with Application Default Credentials
 try:
