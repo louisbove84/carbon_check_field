@@ -25,20 +25,20 @@ jobs:
           mkdir -p .vercel
           cat > .vercel/project.json << EOF
           {
-            "orgId": "${VERCEL_TEAM_ID}",
+            "orgId": "${VERCEL_ORG_ID}",
             "projectId": "${VERCEL_PROJECT_ID}"
           }
           EOF
         env:
-          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
       - name: Deploy to Vercel
         run: >
-          vercel deploy --prod --confirm --yes
+          vercel deploy --prod --yes
           --token $VERCEL_TOKEN
-          --scope $VERCEL_TEAM_ID
+          --scope $VERCEL_ORG_ID
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
