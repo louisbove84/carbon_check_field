@@ -34,6 +34,7 @@ import json
 import time
 import traceback
 import uuid
+import contextvars
 
 # Add feature modules to path (prefer local copies for Cloud Run)
 _base_dir = os.path.dirname(__file__)
@@ -86,10 +87,14 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Request-scoped correlation id for logging across helpers
+request_id_ctx = contextvars.ContextVar("request_id", default="unknown")
+
 # Request logging with correlation id
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
+    token = request_id_ctx.set(request_id)
     start_time = time.time()
     response = None
     try:
@@ -103,6 +108,7 @@ async def log_requests(request: Request, call_next):
             f"[{request_id}] {request.method} {request.url.path} "
             f"status={status} duration_ms={duration_ms} origin={origin}"
         )
+        request_id_ctx.reset(token)
 
 # CORS - Allow Flutter app to call this API
 # Note: When allow_credentials=True, cannot use allow_origins=["*"]
@@ -483,6 +489,16 @@ def predict_crop_type(features: List[float]) -> Tuple[str, float]:
         # Note: sklearn-cpu container may only return class predictions, not probabilities
         # We'll try to extract probabilities if available, otherwise use fallback
         prediction = endpoint.predict(instances=[features])
+
+        request_id = request_id_ctx.get()
+        # Log response for troubleshooting (bounded output)
+        try:
+            print(f"[{request_id}] Vertex endpoint={VERTEX_AI_ENDPOINT}")
+            print(f"[{request_id}] Vertex predictions={prediction.predictions}")
+            if hasattr(prediction, 'probabilities'):
+                print(f"[{request_id}] Vertex probabilities={prediction.probabilities}")
+        except Exception as e:
+            print(f"[{request_id}] Vertex logging failed: {e}")
         
         # Log full response for debugging (first few calls)
         if not hasattr(predict_crop_type, '_logged_response'):
