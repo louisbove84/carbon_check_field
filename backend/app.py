@@ -1039,14 +1039,32 @@ async def analyze_field_grid(coords: List[Tuple[float, float]], area_acres: floa
                 continue
     
     if not cell_results:
-        # Build detailed error message
-        error_detail = f"All {len(cells)} grid cells failed processing. "
-        error_detail += f"Reasons: {failure_reasons['other_crop']} classified as 'Other', "
-        error_detail += f"{failure_reasons['invalid_crop']} invalid crops, "
-        error_detail += f"{len(failure_reasons['exceptions'])} exceptions. "
-        if failure_reasons['exceptions']:
-            error_detail += f"First few errors: {', '.join(failure_reasons['exceptions'][:3])}"
-        raise HTTPException(status_code=500, detail=error_detail)
+        # No crop areas detected; return a valid zero-income response instead of 500
+        print(
+            "No crop zones detected. "
+            f"Other={failure_reasons['other_crop']}, "
+            f"Invalid={failure_reasons['invalid_crop']}, "
+            f"Exceptions={len(failure_reasons['exceptions'])}"
+        )
+        return AnalyzeFieldResponse(
+            area_acres=round(area_acres, 2),
+            co2_income_min=0.0,
+            co2_income_max=0.0,
+            co2_income_avg=0.0,
+            timestamp=datetime.utcnow().isoformat(),
+            field_summary=FieldSummary(
+                total_area_acres=round(area_acres, 2),
+                grid_cell_size_meters=cell_size_meters,
+                total_cells=0
+            ),
+            crop_zones=[],
+            co2_income=CO2IncomeTotal(
+                total_min=0.0,
+                total_max=0.0,
+                total_avg=0.0,
+                by_crop=[]
+            )
+        )
     
     print(f"Processed {len(cell_results)}/{len(cells)} cells successfully")
     
