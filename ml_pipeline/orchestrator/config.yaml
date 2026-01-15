@@ -60,9 +60,9 @@ model:
 # DATA COLLECTION
 # ============================================================
 data_collection:
-  samples_per_crop: 100  # Samples collected per crop each month (legacy, use num_fields_per_crop instead)
-  num_fields_per_crop: 30  # Number of fields to sample per crop
-  num_samples_per_field: 3  # Number of samples per field
+  samples_per_crop: 200  # Samples collected per crop each month (legacy, use num_fields_per_crop instead)
+  num_fields_per_crop: 60  # Number of fields to sample per crop
+  num_samples_per_field: 5  # Number of samples per field
   cdl_year: 2024  # CDL year to use for crop verification
   
   # Crop definitions with CDL codes and counties
@@ -124,7 +124,7 @@ data_collection:
   
   # 'Other' category settings (non-crop areas: buildings, roads, lakes, trees, etc.)
   collect_other: true  # Set to false to skip 'Other' category collection
-  num_other_fields: 30  # Number of non-crop fields to sample (same as crops by default)
+  num_other_fields: 60  # Number of non-crop fields to sample (same as crops by default)
   non_crop_buffer_meters: 150  # Minimum distance (meters) from crop areas for non-crop sampling
                                  # Prevents sampling near crop field edges to avoid confusion
   
