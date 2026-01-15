@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'web_config_stub.dart' if (dart.library.js_util) 'web_config.dart';
 
 /// Application-wide constants for CarbonCheck Field
 /// 
@@ -11,13 +13,20 @@ class AppConstants {
   // ============================================================
   
   /// Google Maps API key (for geocoding and maps)
-  /// Loaded from .env file for security
+  /// Loaded from .env on mobile/desktop, or window.GOOGLE_MAPS_API_KEY on web
   static String get googleMapsApiKey {
+    if (kIsWeb) {
+      final webKey = getMapsKeyFromWindow();
+      if (webKey != null && webKey.isNotEmpty) {
+        return webKey;
+      }
+    }
     final key = dotenv.env['GOOGLE_MAPS_API_KEY'];
     if (key == null || key.isEmpty) {
       throw Exception(
-        'GOOGLE_MAPS_API_KEY not found in .env file. '
-        'Please create .env file with GOOGLE_MAPS_API_KEY=your_key'
+        'GOOGLE_MAPS_API_KEY not found. '
+        'On web, ensure /api/carboncheck-config is reachable. '
+        'On mobile, create .env with GOOGLE_MAPS_API_KEY=your_key.'
       );
     }
     return key;
