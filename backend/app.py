@@ -81,7 +81,9 @@ app.add_middleware(
         "http://localhost:3000",
         "http://127.0.0.1:8080",
         "http://127.0.0.1:3000",
-        # Add your production domain here when deploying
+        "https://carboncheck.beuxbunk.com",
+        "https://www.beuxbunk.com",
+        # Add any additional production domains here
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
