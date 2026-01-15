@@ -33,9 +33,8 @@ class AppConstants {
   }
   
   /// Secure Cloud Run backend URL
-  /// TODO: Update this after deploying backend to Cloud Run
   static const String backendApiUrl = 
-      'https://carboncheck-field-api-XXXXXXXX-uc.a.run.app';
+      'https://carboncheck-field-api-303566498201.us-central1.run.app';
   
   /// API request timeout (seconds)
   static const int apiTimeout = 60;

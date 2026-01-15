@@ -14,7 +14,7 @@ import 'package:carbon_check_field/models/crop_zone.dart';
 
 class BackendService {
   /// Cloud Run backend URL
-  static const String backendUrl = 'https://carboncheck-field-api-6by67xpgga-uc.a.run.app';
+  static const String backendUrl = 'https://carboncheck-field-api-303566498201.us-central1.run.app';
   
   final FirebaseAuth _auth = FirebaseAuth.instance;
   
