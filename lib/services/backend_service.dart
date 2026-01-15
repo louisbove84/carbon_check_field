@@ -181,6 +181,22 @@ class BackendService {
       final cropZonesJson = response['crop_zones'] as List<dynamic>;
       final co2Income = response['co2_income'] as Map<String, dynamic>;
       
+      if (cropZonesJson.isEmpty) {
+        final totalArea = (fieldSummary['total_area_acres'] as num).toDouble();
+        return PredictionResult(
+          cropType: 'No crops detected',
+          confidence: 0.0,
+          cdlCropType: null,
+          cdlAgreement: false,
+          areaAcres: totalArea,
+          carbonIncomeMin: (co2Income['total_min'] as num).toDouble(),
+          carbonIncomeMax: (co2Income['total_max'] as num).toDouble(),
+          carbonIncomeAverage: (co2Income['total_avg'] as num).toDouble(),
+          predictedAt: DateTime.now(),
+          cropZones: const [],
+        );
+      }
+
       // Parse crop zones
       final zones = cropZonesJson
           .map((z) => CropZone.fromJson(z as Map<String, dynamic>))
@@ -201,7 +217,7 @@ class BackendService {
       double totalArea = (fieldSummary['total_area_acres'] as num).toDouble();
       double weightedConfidence = 0;
       for (var zone in cropZonesJson) {
-        final confidence = (zone['confidence'] as num).toDouble();
+        final confidence = (zone['confidence'] as num?)?.toDouble() ?? 0.0;
         final percentage = (zone['percentage'] as num).toDouble();
         weightedConfidence += confidence * (percentage / 100);
       }
