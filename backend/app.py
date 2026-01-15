@@ -32,28 +32,40 @@ from shapely.ops import unary_union
 import sys
 import json
 
-# Add ml_pipeline to path to import shared modules
-_ml_pipeline_path = os.path.join(os.path.dirname(__file__), '..', 'ml_pipeline', 'trainer')
-_shared_path = os.path.join(os.path.dirname(__file__), '..', 'ml_pipeline', 'shared')
+# Add feature modules to path (prefer local copies for Cloud Run)
+_base_dir = os.path.dirname(__file__)
+_local_path = _base_dir
+_ml_pipeline_path = os.path.join(_base_dir, '..', 'ml_pipeline', 'trainer')
+_shared_path = os.path.join(_base_dir, '..', 'ml_pipeline', 'shared')
 
-if os.path.exists(_ml_pipeline_path):
-    sys.path.insert(0, _ml_pipeline_path)
+_feature_paths = [_local_path, _ml_pipeline_path]
+_shared_paths = [_local_path, _shared_path]
+
+def _first_existing(paths: list[str]) -> str | None:
+    for path in paths:
+        if os.path.exists(path):
+            return path
+    return None
+
+_feature_path = _first_existing(_feature_paths)
+if _feature_path:
+    sys.path.insert(0, _feature_path)
     try:
         from feature_engineering import engineer_features_from_raw
     except ImportError as e:
         print(f"⚠️  Could not import feature_engineering: {e}")
         print("   Using fallback feature engineering...")
-        # Fallback - define functions inline if import fails
         def engineer_features_from_raw(*args, **kwargs):
             raise HTTPException(status_code=500, detail="Feature engineering module not available")
 else:
-    print(f"⚠️  Feature engineering module not found at {_ml_pipeline_path}")
+    print("⚠️  Feature engineering module path not found")
     def engineer_features_from_raw(*args, **kwargs):
         raise HTTPException(status_code=500, detail="Feature engineering module not available")
 
 # Import shared Earth Engine features module
-if os.path.exists(_shared_path):
-    sys.path.insert(0, _shared_path)
+_shared_path_resolved = _first_existing(_shared_paths)
+if _shared_path_resolved:
+    sys.path.insert(0, _shared_path_resolved)
     try:
         from earth_engine_features import compute_ndvi_features_sync
         print("✅ Shared Earth Engine features module loaded")
@@ -61,7 +73,7 @@ if os.path.exists(_shared_path):
         print(f"⚠️  Could not import earth_engine_features: {e}")
         compute_ndvi_features_sync = None
 else:
-    print(f"⚠️  Shared module not found at {_shared_path}")
+    print("⚠️  Shared module path not found")
     compute_ndvi_features_sync = None
 
 # Initialize FastAPI

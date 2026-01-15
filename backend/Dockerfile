@@ -17,8 +17,10 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy application code and shared modules
 COPY app.py .
+COPY feature_engineering.py .
+COPY earth_engine_features.py .
 
 # Set environment variables
 ENV PORT=8080
