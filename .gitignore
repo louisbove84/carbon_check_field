@@ -29,6 +29,7 @@ migrate_working_dir/
 .dart_tool/
 .flutter-plugins
 .flutter-plugins-dependencies
+.flutter-plugins-dependencies*
 .packages
 .pub-cache/
 .pub/
@@ -84,6 +85,14 @@ ml_pipeline/test_output/
 # Web configuration with API keys (generated from .env)
 web/config.js
 build/web/assets/.env
+
+# Flutter/Xcode temp files that can appear during local builds
+ios/Flutter/flutter_export_environment*.sh
+ios/Flutter/Flutter*.podspec
+
+# Stray local artifacts (cleanup)
+backend/Cus IRA/
+backend/*.pdf
 
 # iOS build artifacts
 ios/build/
