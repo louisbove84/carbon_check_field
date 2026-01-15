@@ -52,6 +52,11 @@ cd backend
 BACKEND_URL=https://your-service-url.run.app
 ```
 
+**📖 For detailed setup instructions, see:**
+- [Installation Guide](docs/INSTALLATION.md) - Python/ML pipeline setup
+- [iOS Development Guide](docs/IOS_DEVELOPMENT.md) - iOS simulator and build
+- [Deployment Guide](DEPLOYMENT.md) - GCP deployment structure
+
 6. **Run the app**
 ```bash
 # Web (Chrome)
@@ -60,9 +65,15 @@ flutter run -d chrome --web-port=8080
 # Android
 flutter run -d android
 
-# iOS
+# iOS Simulator
 flutter run -d ios
+
+# Or specify a specific simulator
+flutter devices              # List available simulators
+flutter run -d "iPhone 15 Pro"
 ```
+
+**📱 See [iOS Development Guide](docs/IOS_DEVELOPMENT.md) for detailed iOS development instructions**
 
 ## 📁 Project Structure
 
@@ -204,9 +215,11 @@ flutter build appbundle --release
 ### Build iOS Release
 
 ```bash
-flutter build ios --release
-# Then open ios/Runner.xcworkspace in Xcode
+./build_ios.sh
+# Then archive in Xcode (see docs/IOS_DEVELOPMENT.md)
 ```
+
+**📱 See [iOS Development Guide](docs/IOS_DEVELOPMENT.md) for complete iOS build and submission instructions**
 
 ## 🔐 Security
 

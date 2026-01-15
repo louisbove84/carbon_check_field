@@ -922,13 +922,18 @@ async def analyze_field_grid(coords: List[Tuple[float, float]], area_acres: floa
     
     # Process each cell (batch NDVI + batch predictions)
     cell_results = []
+    failure_reasons = {
+        'exceptions': [],
+        'other_crop': 0,
+        'invalid_crop': 0
+    }
     
     # Batch process cells in groups of 10 for efficiency
     batch_size = 10
     for i in range(0, len(cells), batch_size):
         batch = cells[i:i+batch_size]
         
-        for cell in batch:
+        for cell_idx, cell in enumerate(batch):
             try:
                 # Get cell coordinates
                 cell_coords = list(cell.exterior.coords)
@@ -941,15 +946,17 @@ async def analyze_field_grid(coords: List[Tuple[float, float]], area_acres: floa
                 
                 # Skip non-crop cells (parking lots, buildings, etc.) - don't include in results
                 if crop == "Other":
-                    print(f"Skipping non-crop cell (predicted: {crop})")
+                    failure_reasons['other_crop'] += 1
+                    print(f"Skipping non-crop cell {i*batch_size + cell_idx + 1}/{len(cells)} (predicted: {crop})")
                     continue
                 
                 # Validate crop is valid (should not happen if model is trained correctly)
                 try:
                     validate_crop_prediction(crop)
-                except HTTPException:
+                except HTTPException as e:
                     # Skip invalid crops
-                    print(f"Skipping invalid crop cell (predicted: {crop})")
+                    failure_reasons['invalid_crop'] += 1
+                    print(f"Skipping invalid crop cell {i*batch_size + cell_idx + 1}/{len(cells)} (predicted: {crop}, error: {e.detail})")
                     continue
                 
                 cell_results.append({
@@ -957,13 +964,28 @@ async def analyze_field_grid(coords: List[Tuple[float, float]], area_acres: floa
                     'confidence': confidence,
                     'polygon': cell_coords
                 })
+            except HTTPException as e:
+                # Re-raise HTTPExceptions (they should propagate)
+                failure_reasons['exceptions'].append(f"Cell {i*batch_size + cell_idx + 1}: HTTPException - {e.detail}")
+                print(f"Error processing cell {i*batch_size + cell_idx + 1}/{len(cells)}: {e.detail}")
+                raise
             except Exception as e:
-                print(f"Warning: Cell processing failed: {e}")
+                # Track other exceptions but continue processing
+                error_msg = f"Cell {i*batch_size + cell_idx + 1}: {type(e).__name__} - {str(e)}"
+                failure_reasons['exceptions'].append(error_msg)
+                print(f"Warning: Cell {i*batch_size + cell_idx + 1}/{len(cells)} processing failed: {e}")
                 # Skip failed cells
                 continue
     
     if not cell_results:
-        raise HTTPException(status_code=500, detail="All grid cells failed processing")
+        # Build detailed error message
+        error_detail = f"All {len(cells)} grid cells failed processing. "
+        error_detail += f"Reasons: {failure_reasons['other_crop']} classified as 'Other', "
+        error_detail += f"{failure_reasons['invalid_crop']} invalid crops, "
+        error_detail += f"{len(failure_reasons['exceptions'])} exceptions. "
+        if failure_reasons['exceptions']:
+            error_detail += f"First few errors: {', '.join(failure_reasons['exceptions'][:3])}"
+        raise HTTPException(status_code=500, detail=error_detail)
     
     print(f"Processed {len(cell_results)}/{len(cells)} cells successfully")
     

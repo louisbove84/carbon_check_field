@@ -1,7 +1,7 @@
 # Next Steps After Bundle ID Registration
 
 ## ✅ Bundle ID Registered
-`com.carboncheck.carbonCheckField (explicit)`
+`com.carboncheck.field (explicit)`
 
 ## Now in Xcode:
 

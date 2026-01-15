@@ -1,6 +1,19 @@
 # Installation Guide
 
-## ⚠️ Important: GCP vs Local Development
+Complete guide for setting up the CarbonCheck Field development environment.
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Quick Start](#quick-start)
+3. [Python Setup](#python-setup)
+4. [Troubleshooting](#troubleshooting)
+
+---
+
+## Overview
+
+### GCP vs Local Development
 
 **For GCP Deployment**: Each service uses its own `requirements.txt`:
 - `backend/requirements.txt` → Backend Dockerfile
@@ -9,14 +22,16 @@
 
 **For Local Development**: Use the consolidated files below.
 
-See [DEPLOYMENT.md](DEPLOYMENT.md) for GCP deployment details.
+See [DEPLOYMENT.md](../DEPLOYMENT.md) for GCP deployment details.
 
-## Quick Start (Local Development)
+---
+
+## Quick Start
 
 ### Option 1: Using the Setup Script (Recommended)
 
 ```bash
-cd /Users/beuxb/Desktop/Projects/carbon_check_field
+cd carbon_check_field
 ./setup_venv.sh
 ```
 
@@ -27,7 +42,7 @@ This will:
 ### Option 2: Using pyproject.toml (Modern Python)
 
 ```bash
-cd /Users/beuxb/Desktop/Projects/carbon_check_field
+cd carbon_check_field
 
 # Create venv if needed
 /opt/homebrew/bin/python3.13 -m venv venv
@@ -40,7 +55,7 @@ pip install -e ".[all]"
 ### Option 3: Manual Installation
 
 ```bash
-cd /Users/beuxb/Desktop/Projects/carbon_check_field
+cd carbon_check_field
 
 # Create venv
 /opt/homebrew/bin/python3.13 -m venv venv
@@ -49,6 +64,50 @@ source venv/bin/activate
 # Install all dependencies
 pip install -r requirements-all.txt
 ```
+
+---
+
+## Python Setup
+
+### Python 3.13 Requirements
+
+Python 3.13 requires:
+1. **GEOS library** for `shapely` (system dependency)
+2. **Newer pydantic** version (2.5.3 is too old for Python 3.13)
+
+### Step 1: Install GEOS (required for shapely)
+
+```bash
+brew install geos
+```
+
+### Step 2: Install Python dependencies
+
+The `requirements-all.txt` has been updated with Python 3.13-compatible versions:
+
+```bash
+cd carbon_check_field
+source venv/bin/activate
+pip install -r requirements-all.txt
+```
+
+### Alternative: Use Python 3.11 (matches Dockerfiles)
+
+If you prefer to match the Dockerfiles exactly (which use Python 3.11):
+
+```bash
+# Install Python 3.11 via Homebrew
+brew install python@3.11
+
+# Create venv with Python 3.11
+/opt/homebrew/bin/python3.11 -m venv venv
+source venv/bin/activate
+pip install -r requirements-all.txt
+```
+
+**Note:** The Dockerfiles use Python 3.11, so using Python 3.11 locally ensures exact compatibility with production.
+
+---
 
 ## What Gets Installed
 
@@ -73,6 +132,8 @@ The installation includes:
 ### Orchestrator (`[orchestrator]`)
 - `flask`, `gunicorn` - Lightweight web server
 
+---
+
 ## File Structure
 
 - **`pyproject.toml`** - Modern Python project configuration with optional dependencies
@@ -81,46 +142,84 @@ The installation includes:
 - **`ml_pipeline/trainer/requirements.txt`** - ML training dependencies
 - **`ml_pipeline/orchestrator/requirements.txt`** - Orchestrator dependencies
 
+---
+
 ## Using the Virtual Environment
 
-**Activate:**
+### Activate
+
 ```bash
 source venv/bin/activate
 ```
 
-**Run training:**
+### Run Training
+
 ```bash
+# Option 1: Use the helper script
 ./run_training.sh --sample-size 300
+
+# Option 2: Activate venv manually
+source venv/bin/activate
+python ml_pipeline/tools/test_training.py --sample-size 300
 ```
 
-**Deactivate:**
+### Deactivate
+
 ```bash
 deactivate
 ```
 
+### Development Mode
+
+For development, install with dev dependencies:
+
+```bash
+pip install -e ".[all,dev]"
+```
+
+---
+
 ## Troubleshooting
 
 ### SSL Certificate Errors
+
 If you see SSL certificate errors, try:
+
 ```bash
 pip install --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org -r requirements-all.txt
 ```
 
 ### Python Crashes
+
 The virtual environment uses Python 3.13.9 from Homebrew, which should be stable. If you still experience crashes:
+
 1. Make sure you're using the venv Python: `which python` should show `venv/bin/python`
 2. Try reinstalling: `rm -rf venv && ./setup_venv.sh`
 
 ### Missing Dependencies
+
 If a specific module is missing, install it:
+
 ```bash
 source venv/bin/activate
 pip install <package-name>
 ```
 
-## Development
+### Viewing Results
 
-For development, install with dev dependencies:
+After training completes, view TensorBoard:
+
 ```bash
-pip install -e ".[all,dev]"
+source venv/bin/activate
+tensorboard --logdir test_output/tensorboard_logs
 ```
+
+The confusion matrix will show all classes including 'Other' if it's in your BigQuery data.
+
+---
+
+## Next Steps
+
+- See [DEPLOYMENT.md](../DEPLOYMENT.md) for GCP deployment structure
+- See [README.md](../README.md) for project overview
+- See [docs/IOS_DEVELOPMENT.md](./IOS_DEVELOPMENT.md) for iOS development
