@@ -20,12 +20,24 @@ jobs:
       - name: Install Vercel CLI
         run: npm install -g vercel@latest
 
+      - name: Link Vercel Project
+        run: |
+          mkdir -p .vercel
+          cat > .vercel/project.json << EOF
+          {
+            "orgId": "${VERCEL_TEAM_ID}",
+            "projectId": "${VERCEL_PROJECT_ID}"
+          }
+          EOF
+        env:
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
       - name: Deploy to Vercel
         run: >
           vercel deploy --prod --confirm --yes
           --token $VERCEL_TOKEN
           --scope $VERCEL_TEAM_ID
-          --project $VERCEL_PROJECT_ID
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
