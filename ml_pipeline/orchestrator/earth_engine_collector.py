@@ -417,7 +417,7 @@ def export_to_bigquery(feature_collection: ee.FeatureCollection,
     return task.id
 
 
-def wait_for_export(task_id: str, timeout_minutes: int = 30):
+def wait_for_export(task_id: str, timeout_minutes: int = 120):
     """
     Wait for BigQuery export to complete.
     

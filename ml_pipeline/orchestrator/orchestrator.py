@@ -208,7 +208,9 @@ def export_earth_engine_data():
             logger.info(f"   ✅ Created dataset {dataset_id} in US")
         
         # Check if data already exists (skip collection if recent data exists and overwrite is False)
-        overwrite_table = config.get('data_collection', {}).get('overwrite_table', True)
+        data_collection_config = config.get('data_collection', {})
+        overwrite_table = data_collection_config.get('overwrite_table', True)
+        export_timeout_minutes = data_collection_config.get('export_timeout_minutes', 120)
         if not overwrite_table:
             try:
                 # Don't specify location - let BigQuery auto-detect (works for both US and us-central1)
@@ -248,7 +250,7 @@ def export_earth_engine_data():
         
         # Wait for export to complete (with timeout)
         logger.info("   ⏳ Waiting for export to complete...")
-        success = wait_for_export(task_id, timeout_minutes=30)
+        success = wait_for_export(task_id, timeout_minutes=export_timeout_minutes)
         
         if not success:
             error_msg = f"Export task {task_id} did not complete successfully"

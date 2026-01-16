@@ -127,6 +127,7 @@ data_collection:
   num_other_fields: 300  # Number of non-crop fields to sample (same as crops by default)
   non_crop_buffer_meters: 150  # Minimum distance (meters) from crop areas for non-crop sampling
                                  # Prevents sampling near crop field edges to avoid confusion
+  export_timeout_minutes: 180  # Wait longer for large EE exports (minutes)
   
   # Data export settings
   overwrite_table: true  # Set to true to clear BigQuery table and start fresh with balanced data
