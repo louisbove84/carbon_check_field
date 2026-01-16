@@ -217,24 +217,25 @@ class _ResultsScreenState extends State<ResultsScreen> {
           
           const SizedBox(height: 12),
           
-          // Show crop zones button (only for multi-zone results)
-          if (_result!.hasMultipleZones)
-            Column(
-              children: [
-                ElevatedButton.icon(
-                  onPressed: _showCropZonesMap,
-                  icon: const Icon(Icons.map, size: 20),
-                  label: Text('View ${_result!.distinctCropCount} Crop Zones'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2E7D32),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                    minimumSize: const Size(double.infinity, 54),
-                  ),
+          // Map preview (always available after analysis)
+          Column(
+            children: [
+              ElevatedButton.icon(
+                onPressed: _showCropZonesMap,
+                icon: const Icon(Icons.map, size: 20),
+                label: _result!.hasMultipleZones
+                    ? Text('View ${_result!.distinctCropCount} Crop Zones')
+                    : const Text('Preview Map'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2E7D32),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                  minimumSize: const Size(double.infinity, 54),
                 ),
-                const SizedBox(height: 8),
-              ],
-            ),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
           
           // Action buttons (compact)
           Row(
