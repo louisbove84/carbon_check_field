@@ -43599,13 +43599,12 @@ n=l.gWL()
 m=B.e.a8(l.w,0)
 l=l.x.k(0).split(" ")[0]
 $.aLn().pr(0,"\ud83c\udf3e CarbonCheck Field Results\n\nModel Prediction: "+s+" ("+(p+"%")+" confidence)"+q+r+"\nField Area: "+(o+" acres")+"\nEstimated CO\u2082 Income: "+n+"/year\nAverage: "+("$"+m)+"/year\n\nAnalyzed on "+l+"\n  ",null,null)}},
-aiH(){var s,r=this.r
-if(r!=null){r=r.y
-r=r!=null&&r.length!==0}else r=!1
-if(r){r=this.c
-r.toString
-s=A.adG(new A.atU(this),null,t.z)
-A.iC(r,!1).kR(s)}}}
+aiH(){var s,r
+if(this.r==null)return
+s=this.c
+s.toString
+r=A.adG(new A.atU(this),null,t.z)
+A.iC(s,!1).kR(r)}}
 A.atQ.prototype={
 $0(){this.a.f="Connecting securely..."},
 $S:0}
