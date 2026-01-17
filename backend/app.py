@@ -71,14 +71,16 @@ _shared_path_resolved = _first_existing(_shared_paths)
 if _shared_path_resolved:
     sys.path.insert(0, _shared_path_resolved)
     try:
-        from earth_engine_features import compute_ndvi_features_sync
+        from earth_engine_features import compute_ndvi_features_sync, compute_ndvi_debug_info
         print("✅ Shared Earth Engine features module loaded")
     except ImportError as e:
         print(f"⚠️  Could not import earth_engine_features: {e}")
         compute_ndvi_features_sync = None
+        compute_ndvi_debug_info = None
 else:
     print("⚠️  Shared module path not found")
     compute_ndvi_features_sync = None
+    compute_ndvi_debug_info = None
 
 # Initialize FastAPI
 app = FastAPI(
@@ -399,7 +401,7 @@ FEATURE_NAMES = [
     "ndvi_late_ratio",
 ]
 
-def compute_ndvi_features(polygon_coords: List[Tuple[float, float]], year: int) -> List[float]:
+def compute_ndvi_features(polygon_coords: List[Tuple[float, float]], year: int, debug: bool = False) -> List[float]:
     """
     Compute 15 NDVI features from Sentinel-2 imagery for a given polygon.
     Uses shared Earth Engine feature extraction module.
@@ -428,6 +430,15 @@ def compute_ndvi_features(polygon_coords: List[Tuple[float, float]], year: int) 
         # Create Earth Engine polygon
         ee_polygon = ee.Geometry.Polygon([polygon_coords])
         
+        # Optional debug logging for Earth Engine values
+        if debug and compute_ndvi_debug_info:
+            try:
+                request_id = request_id_ctx.get()
+                ee_debug = compute_ndvi_debug_info(ee_polygon, year)
+                print(f"[{request_id}] EE debug={ee_debug}")
+            except Exception as e:
+                print(f"⚠️  EE debug logging failed: {e}")
+
         # Use shared Earth Engine feature extraction (SINGLE SOURCE OF TRUTH!)
         if compute_ndvi_features_sync:
             raw_features = compute_ndvi_features_sync(ee_polygon, year)
@@ -956,7 +967,7 @@ async def analyze_field_single(coords: List[Tuple[float, float]], area_acres: fl
     print(f"Single prediction mode for {area_acres:.1f} acre field...")
     
     # Compute NDVI features via Earth Engine
-    features = compute_ndvi_features(coords, year)
+    features = compute_ndvi_features(coords, year, debug=True)
 
     request_id = request_id_ctx.get()
     feature_log = dict(zip(FEATURE_NAMES, features))
@@ -1039,7 +1050,7 @@ async def analyze_field_grid(coords: List[Tuple[float, float]], area_acres: floa
                 cell_coords = list(cell.exterior.coords)
                 
                 # Compute NDVI features for this cell
-                features = compute_ndvi_features(cell_coords, year)
+                features = compute_ndvi_features(cell_coords, year, debug=cell_number <= 2)
 
                 # Log first few cells for debugging
                 cell_number = i * batch_size + cell_idx + 1

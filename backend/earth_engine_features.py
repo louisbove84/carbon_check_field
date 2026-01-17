@@ -9,6 +9,83 @@ import ee
 from typing import Dict, List, Tuple
 
 
+def compute_ndvi_debug_info(
+    geometry: ee.Geometry,
+    year: int,
+    buffer_size: int = 50
+) -> Dict[str, any]:
+    """
+    Collect debug info for Earth Engine NDVI extraction.
+    This is intended for server-side logging only.
+    """
+    start_date = f'{year}-04-15'
+    end_date = f'{year}-09-01'
+    early_end = f'{year}-06-01'
+    late_start = f'{year}-07-01'
+
+    s2_collection = (
+        ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+        .filterDate(start_date, end_date)
+        .filterBounds(geometry)
+        .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
+    )
+
+    def add_ndvi(image):
+        ndvi = image.normalizedDifference(['B8', 'B4']).rename('NDVI')
+        return ndvi.copyProperties(image, ['system:time_start'])
+
+    ndvi_collection = s2_collection.map(add_ndvi).select('NDVI')
+
+    ndvi_stats = ndvi_collection.median().reduceRegion(
+        reducer=ee.Reducer.mean()
+            .combine(ee.Reducer.stdDev(), '', True)
+            .combine(ee.Reducer.min(), '', True)
+            .combine(ee.Reducer.max(), '', True)
+            .combine(ee.Reducer.percentile([25, 50, 75]), '', True),
+        geometry=geometry.buffer(buffer_size),
+        scale=10,
+        maxPixels=1e9
+    )
+
+    early_ndvi = (
+        ndvi_collection
+        .filterDate(start_date, early_end)
+        .median()
+        .reduceRegion(
+            reducer=ee.Reducer.mean(),
+            geometry=geometry.buffer(buffer_size),
+            scale=10,
+            maxPixels=1e9
+        )
+    )
+
+    late_ndvi = (
+        ndvi_collection
+        .filterDate(late_start, end_date)
+        .median()
+        .reduceRegion(
+            reducer=ee.Reducer.mean(),
+            geometry=geometry.buffer(buffer_size),
+            scale=10,
+            maxPixels=1e9
+        )
+    )
+
+    return {
+        "collection_size": s2_collection.size().getInfo(),
+        "ndvi_collection_size": ndvi_collection.size().getInfo(),
+        "ndvi_stats": ndvi_stats.getInfo(),
+        "early_ndvi": early_ndvi.getInfo(),
+        "late_ndvi": late_ndvi.getInfo(),
+        "dates": {
+            "start": start_date,
+            "end": end_date,
+            "early_end": early_end,
+            "late_start": late_start
+        }
+    }
+
+
 def compute_ndvi_features_ee(
     geometry: ee.Geometry,
     year: int,
