@@ -158,7 +158,7 @@ class BackendService {
       // Otherwise, parse as single prediction (legacy format)
       return PredictionResult(
         cropType: response['crop'] as String,
-        confidence: (response['confidence'] as num).toDouble(),
+        confidence: (response['confidence'] as num?)?.toDouble() ?? -1,
         cdlCropType: response['cdl_crop'] as String?,
         cdlAgreement: response['cdl_agreement'] as bool? ?? false,
         areaAcres: areaAcres,
@@ -216,10 +216,14 @@ class BackendService {
       // Calculate weighted average confidence across all zones
       double totalArea = (fieldSummary['total_area_acres'] as num).toDouble();
       double weightedConfidence = 0;
+      final confidenceAvailable = zones.every((z) => z.confidence != null);
       for (var zone in cropZonesJson) {
         final confidence = (zone['confidence'] as num?)?.toDouble() ?? 0.0;
         final percentage = (zone['percentage'] as num).toDouble();
         weightedConfidence += confidence * (percentage / 100);
+      }
+      if (!confidenceAvailable) {
+        weightedConfidence = -1;
       }
       
       // Count distinct crops

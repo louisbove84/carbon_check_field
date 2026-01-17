@@ -57,7 +57,8 @@ class PredictionResult {
   });
 
   /// Format confidence as percentage string
-  String get confidencePercentage => '${(confidence * 100).toStringAsFixed(0)}%';
+  String get confidencePercentage =>
+      confidence < 0 ? 'N/A' : '${(confidence * 100).toStringAsFixed(0)}%';
 
   /// Format income range as currency string
   String get incomeRangeFormatted =>
