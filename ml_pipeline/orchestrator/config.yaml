@@ -130,7 +130,7 @@ data_collection:
   export_timeout_minutes: 180  # Wait longer for large EE exports (minutes)
   
   # Data export settings
-  overwrite_table: true  # Set to true to clear BigQuery table and start fresh with balanced data
+  overwrite_table: false  # Set to true to clear BigQuery table and start fresh with balanced data
                           # Set to false to use existing data (skip collection if data exists)
 
 # ============================================================

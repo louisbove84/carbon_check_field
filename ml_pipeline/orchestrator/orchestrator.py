@@ -627,6 +627,7 @@ def evaluate_and_deploy(training_result):
         
         # Check quality gates
         force_deploy = gates.get('force_deploy', False)
+        improvement_margin = gates.get('improvement_margin', 0.0)
         
         if force_deploy:
             logger.warning("   ⚠️  FORCE DEPLOY enabled - bypassing quality gates")
@@ -637,6 +638,12 @@ def evaluate_and_deploy(training_result):
             logger.info(f"   Minimum required: {gates['absolute_min_accuracy']:.0%}")
         
         should_deploy = force_deploy or challenger_accuracy >= gates['absolute_min_accuracy']
+        if champion_metrics:
+            meets_margin = improvement >= improvement_margin
+            logger.info(f"   Improvement margin required: {improvement_margin:.2%}")
+            logger.info(f"   Meets improvement margin: {meets_margin}")
+        else:
+            logger.info(f"   Improvement margin required: {improvement_margin:.2%}")
         
         if should_deploy:
             if not force_deploy:
