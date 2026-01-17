@@ -86,6 +86,8 @@ ml_pipeline/test_output/
 web/config.js
 web/config.local.js
 build/web/assets/.env
+build/web/config.local.js
+build/web/config.local.example.js
 
 # Flutter/Xcode temp files that can appear during local builds
 ios/Flutter/flutter_export_environment*.sh
