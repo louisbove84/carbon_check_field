@@ -4,11 +4,11 @@ A Flutter app that helps farmers analyze crop types and estimate carbon credit i
 
 ## Start Here
 
-- Quick start: `docs/QUICK_START.md`
-- Run locally: `docs/RUNNING.md`
-- App sections: `docs/APP_SECTIONS.md`
-- Deployment: `docs/DEPLOYMENT_GUIDE.md`
-- ML evaluation & pipeline: `docs/MODEL_EVALUATION_GUIDE.md`
+- Quick start: [docs/QUICK_START.md](docs/QUICK_START.md)
+- Run locally: [docs/RUNNING.md](docs/RUNNING.md)
+- App sections: [docs/APP_SECTIONS.md](docs/APP_SECTIONS.md)
+- Deployment: [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md)
+- ML evaluation & pipeline: [docs/MODEL_EVALUATION_GUIDE.md](docs/MODEL_EVALUATION_GUIDE.md)
 
 ## Repo Snapshot
 
