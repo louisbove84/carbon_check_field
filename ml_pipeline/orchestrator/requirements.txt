@@ -10,6 +10,7 @@ earthengine-api>=0.1.384
 # Configuration
 PyYAML>=6.0.1
 pandas>=2.2.2
+db-dtypes>=1.2.0
 
 # Web Server
 flask>=2.3.0
