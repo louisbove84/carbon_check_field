@@ -1,286 +1,30 @@
 # CarbonCheck Field 🌾
 
-A Flutter mobile app that helps farmers analyze crop types and estimate carbon credit income using satellite imagery and AI.
+A Flutter app that helps farmers analyze crop types and estimate carbon credit income using satellite imagery and AI.
 
-## ✨ Key Features
+## Start Here
 
-- **Interactive Field Drawing** - Draw field boundaries on satellite maps with real-time acreage calculation
-- **Multi-Zone Analysis** - Detects multiple crop zones within large fields (up to 2,000 acres)
-- **AI Crop Classification** - Uses Google Vertex AI to predict crop types (Corn, Soybeans, Alfalfa, Winter Wheat)
-- **Satellite NDVI Analysis** - Processes Sentinel-2 imagery via Google Earth Engine
-- **Carbon Credit Estimates** - Real-world 2025 rates ($10-$25/acre based on crop type)
-- **Automated ML Pipeline** - Monthly retraining with fresh satellite data
-- **Secure Architecture** - No service account keys in app, all GCP calls through Cloud Run backend
+- Quick start: `docs/QUICK_START.md`
+- Run locally: `docs/RUNNING.md`
+- App sections: `docs/APP_SECTIONS.md`
+- Deployment: `docs/DEPLOYMENT_GUIDE.md`
+- ML evaluation & pipeline: `docs/MODEL_EVALUATION_GUIDE.md`
 
-## 🚀 Quick Start
+## Repo Snapshot
 
-### Prerequisites
+- Flutter app: `lib/`
+- Backend (FastAPI): `backend/`
+- ML pipeline: `ml_pipeline/`
+- Docs: `docs/`
 
-- Flutter SDK 3.0+
-- Google Cloud project with Earth Engine & Vertex AI enabled
-- Firebase project configured
-- Google Maps API key
+## Key Features
 
-### Setup
+- Draw fields on satellite maps with real-time acreage
+- Multi-zone crop detection for larger fields
+- Vertex AI crop classification + Earth Engine NDVI features
+- Carbon credit estimates (2025 rates)
+- Automated ML pipeline with champion/challenger evaluation
 
-1. **Clone and install dependencies**
-```bash
-git clone <your-repo-url>
-cd carbon_check_field
-flutter pub get
-```
+## Support
 
-2. **Configure environment variables**
-```bash
-cp .env.example .env
-# Edit .env with your API keys
-```
-
-3. **Setup Firebase**
-- Download `google-services.json` → `android/app/`
-- Download `GoogleService-Info.plist` → `ios/Runner/`
-- Enable anonymous authentication in Firebase Console
-
-4. **Deploy backend**
-```bash
-cd backend
-./setup_and_deploy.sh
-```
-
-5. **Update backend URL in `.env`**
-```
-BACKEND_URL=https://your-service-url.run.app
-```
-
-**📖 For detailed setup instructions, see:**
-- [Installation Guide](docs/INSTALLATION.md) - Python/ML pipeline setup
-- [iOS Development Guide](docs/IOS_DEVELOPMENT.md) - iOS simulator and build
-- [Deployment Guide](DEPLOYMENT.md) - GCP deployment structure
-
-6. **Run the app**
-```bash
-# Web (Chrome)
-flutter run -d chrome --web-port=8080
-
-# Android
-flutter run -d android
-
-# iOS Simulator
-flutter run -d ios
-
-# Or specify a specific simulator
-flutter devices              # List available simulators
-flutter run -d "iPhone 15 Pro"
-```
-
-**📱 See [iOS Development Guide](docs/IOS_DEVELOPMENT.md) for detailed iOS development instructions**
-
-## 📁 Project Structure
-
-```
-lib/                        # Flutter app code
-├── main.dart              # Entry point with Firebase init
-├── models/                # Data models (FieldData, PredictionResult, CropZone)
-├── screens/               # UI screens (Home, Map, Results, CropZones)
-├── services/              # Backend & Firebase services
-├── utils/                 # Constants and utilities
-└── widgets/               # Reusable components
-
-backend/                   # Python FastAPI backend
-├── app.py                # Main API with Earth Engine + Vertex AI integration
-├── Dockerfile            # Container for Cloud Run
-└── requirements.txt      # Python dependencies
-
-ml_pipeline/              # Automated ML training pipeline
-├── auto_retrain_model.py # Retrains model monthly
-├── monthly_data_collection.py  # Collects training data
-└── NDVI_info             # Earth Engine script for data generation
-```
-
-## 🤖 Automated ML Pipeline with Quality Gates
-
-The project includes a production-grade ML pipeline with champion/challenger evaluation:
-
-- ✅ **Monthly data collection** - Collects fresh training data from Earth Engine
-- ✅ **Permanent holdout test set** - 20% of data reserved for unbiased evaluation
-- ✅ **Automated retraining** - Trains on all historical data (excluding holdout)
-- ✅ **Champion vs Challenger** - Compares new model against current production model
-- ✅ **Quality gates** - Only deploys if new model meets thresholds:
-  - Accuracy ≥ 75% (absolute minimum)
-  - Each crop F1 score ≥ 0.70
-  - Beats champion by ≥ 2%
-- ✅ **Metrics tracking** - Stores all evaluations in BigQuery for monitoring
-
-### Deploy the Pipeline
-
-```bash
-cd ml_pipeline
-
-# 1. Create BigQuery tables for evaluation
-bq query --use_legacy_sql=false < setup_evaluation_tables.sql
-
-# 2. Deploy Cloud Functions
-./deploy_pipeline.sh
-```
-
-The pipeline runs automatically:
-- **1st of each month:** Collect 400 new training samples
-- **5th of each month:** Train & evaluate new model, deploy only if it passes all quality gates
-
-### View Evaluation Results
-
-```sql
--- Recent model performance
-SELECT model_type, accuracy, corn_f1, soybeans_f1, alfalfa_f1, winter_wheat_f1
-FROM `ml-pipeline-477612.crop_ml.model_performance`
-ORDER BY evaluation_time DESC LIMIT 10;
-
--- Deployment history
-SELECT deployment_time, deployment_decision, accuracy, gates_failed
-FROM `ml-pipeline-477612.crop_ml.deployment_history`
-ORDER BY deployment_time DESC LIMIT 10;
-```
-
-**📖 Full Guide:** See [`ml_pipeline/MODEL_EVALUATION_GUIDE.md`](ml_pipeline/MODEL_EVALUATION_GUIDE.md) for detailed explanation
-
-## 🏗️ Architecture
-
-```
-Flutter App (Mobile/Web)
-    ↓
-Firebase Authentication (anonymous)
-    ↓
-Cloud Run Backend (FastAPI)
-    ↓
-├── Google Earth Engine (NDVI features)
-├── Vertex AI (crop prediction)
-└── USDA CDL (ground truth validation)
-```
-
-### Key Technical Features
-
-- **Grid-based classification** - Fields >10 acres split into adaptive grids (max 25 cells)
-- **Spatial grouping** - Adjacent cells with same crop merged into zones
-- **Polygon validation** - Automatic repair of self-intersecting geometries
-- **Optimized cell sizing** - [50, 100, 200, 300, 500] meter grids based on field size
-
-## 🧪 Testing
-
-### Test Endpoint Locally
-
-```bash
-cd backend
-uvicorn app:app --reload
-```
-
-### Run Flutter App Locally
-
-```bash
-# Web (easiest for testing)
-flutter run -d chrome --web-port=8080
-
-# Android device
-flutter run -d <device-id>
-```
-
-### Test Deployed Backend
-
-```bash
-curl https://your-backend-url.run.app/health
-```
-
-## 🚢 Deployment
-
-### Deploy Backend
-
-```bash
-cd backend
-gcloud run deploy carboncheck-field-api \
-  --source . \
-  --region us-central1 \
-  --allow-unauthenticated
-```
-
-### Build Android Release
-
-```bash
-flutter build apk --release
-# Install on device
-flutter install -d <device-id>
-
-# Or build app bundle for Google Play
-flutter build appbundle --release
-```
-
-### Build iOS Release
-
-```bash
-./build_ios.sh
-# Then archive in Xcode (see docs/IOS_DEVELOPMENT.md)
-```
-
-**📱 See [iOS Development Guide](docs/IOS_DEVELOPMENT.md) for complete iOS build and submission instructions**
-
-## 🔐 Security
-
-- ✅ **No GCP credentials in app** - All API calls proxied through Cloud Run
-- ✅ **Application Default Credentials** - Backend uses Google-managed auth
-- ✅ **Firebase token verification** - All requests authenticated
-- ✅ **Environment variables** - API keys in `.env` (gitignored)
-- ✅ **HTTPS everywhere** - All traffic encrypted
-
-## 💰 Carbon Credit Rates (2025)
-
-| Crop         | $/acre/year |
-|--------------|-------------|
-| Corn         | $12 - $18   |
-| Soybeans     | $15 - $22   |
-| Alfalfa      | $18 - $25   |
-| Winter Wheat | $10 - $15   |
-
-*Based on Indigo Ag and Truterra markets*
-
-## 🐛 Troubleshooting
-
-### "Backend timeout or 500 error"
-- Check backend logs: `gcloud run logs tail carboncheck-field-api --region us-central1`
-- Verify Earth Engine authentication is configured
-- Check polygon is not self-intersecting (app will auto-fix simple cases)
-
-### "Map is blank"
-- Verify Google Maps API key in `.env`
-- Enable billing on GCP project
-- Enable Maps SDK for Android/iOS
-
-### "Firebase initialization failed"
-- Ensure `google-services.json` and `GoogleService-Info.plist` are present
-- Enable anonymous auth in Firebase Console
-
-### Android build errors
-```bash
-cd android
-./gradlew clean
-flutter clean
-flutter pub get
-```
-
-## 📊 Monitoring
-
-### Cloud Run Logs
-```bash
-gcloud run logs tail carboncheck-field-api --region us-central1 --format json
-```
-
-### API Usage
-- Google Cloud Console → APIs & Services → Dashboard
-- Monitor Earth Engine, Vertex AI, and Maps quotas
-
-## 📜 License
-
-MIT License
-
----
-
-**Built with Flutter, Google Earth Engine, and Vertex AI**
-
-**Default Map Center:** Northeast Wisconsin (44.409438290384166, -88.4304410977501)
+If you hit setup issues, start with `docs/QUICK_START.md` and `docs/RUNNING.md`.
