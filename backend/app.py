@@ -915,9 +915,13 @@ async def analyze_field(
     request_id = req.headers.get("x-request-id") if req else None
     user_id = user.get("uid") if isinstance(user, dict) else None
     try:
+        year = request.year
+        if year > 2025:
+            year = 2025
+            print(f"[{request_id}] forcing year=2025 for imagery availability")
         print(
             f"[{request_id}] analyze start uid={user_id} "
-            f"points={len(request.polygon)} year={request.year}"
+            f"points={len(request.polygon)} year={year}"
         )
         # Convert polygon to (lng, lat) tuples
         coords = [(point.lng, point.lat) for point in request.polygon]
@@ -941,12 +945,12 @@ async def analyze_field(
         # Choose analysis method based on field size
         if area_acres < MIN_FIELD_SIZE_FOR_GRID:
             # Small field: use single prediction (fast)
-            result = await analyze_field_single(coords, area_acres, request.year)
+            result = await analyze_field_single(coords, area_acres, year)
             print(f"[{request_id}] analyze complete mode=single")
             return result
         else:
             # Large field: use grid-based classification (detailed)
-            result = await analyze_field_grid(coords, area_acres, request.year)
+            result = await analyze_field_grid(coords, area_acres, year)
             print(f"[{request_id}] analyze complete mode=grid")
             return result
 
