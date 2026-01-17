@@ -61,7 +61,7 @@ model:
 # ============================================================
 data_collection:
   samples_per_crop: 1000  # Samples collected per crop each month (legacy, use num_fields_per_crop instead)
-  num_fields_per_crop: 300  # Number of fields to sample per crop
+  num_fields_per_crop: 30  # Number of fields to sample per crop
   num_samples_per_field: 3  # Number of samples per field
   cdl_year: 2024  # CDL year to use for crop verification
   
@@ -124,13 +124,13 @@ data_collection:
   
   # 'Other' category settings (non-crop areas: buildings, roads, lakes, trees, etc.)
   collect_other: true  # Set to false to skip 'Other' category collection
-  num_other_fields: 300  # Number of non-crop fields to sample (same as crops by default)
+  num_other_fields: 30  # Number of non-crop fields to sample (same as crops by default)
   non_crop_buffer_meters: 150  # Minimum distance (meters) from crop areas for non-crop sampling
                                  # Prevents sampling near crop field edges to avoid confusion
   export_timeout_minutes: 180  # Wait longer for large EE exports (minutes)
   
   # Data export settings
-  overwrite_table: false  # Set to true to clear BigQuery table and start fresh with balanced data
+  overwrite_table: true  # Set to true to clear BigQuery table and start fresh with balanced data
                           # Set to false to use existing data (skip collection if data exists)
 
 # ============================================================
@@ -138,7 +138,7 @@ data_collection:
 # ============================================================
 quality_gates:
   # Minimum accuracy for deployment
-  absolute_min_accuracy: 0.75  # 75%
+  absolute_min_accuracy: 0.99  # Temporary high bar to avoid deployment
   
   # Minimum F1 score per crop
   min_per_crop_f1: 0.70  # 70%
