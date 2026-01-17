@@ -58,12 +58,12 @@ if _feature_path:
     try:
         from feature_engineering import engineer_features_from_raw
     except ImportError as e:
-        print(f"⚠️  Could not import feature_engineering: {e}")
+        print(f"️  Could not import feature_engineering: {e}")
         print("   Using fallback feature engineering...")
         def engineer_features_from_raw(*args, **kwargs):
             raise HTTPException(status_code=500, detail="Feature engineering module not available")
 else:
-    print("⚠️  Feature engineering module path not found")
+    print("️  Feature engineering module path not found")
     def engineer_features_from_raw(*args, **kwargs):
         raise HTTPException(status_code=500, detail="Feature engineering module not available")
 
@@ -73,13 +73,13 @@ if _shared_path_resolved:
     sys.path.insert(0, _shared_path_resolved)
     try:
         from earth_engine_features import compute_ndvi_features_sync, compute_ndvi_debug_info
-        print("✅ Shared Earth Engine features module loaded")
+        print(" Shared Earth Engine features module loaded")
     except ImportError as e:
-        print(f"⚠️  Could not import earth_engine_features: {e}")
+        print(f"️  Could not import earth_engine_features: {e}")
         compute_ndvi_features_sync = None
         compute_ndvi_debug_info = None
 else:
-    print("⚠️  Shared module path not found")
+    print("️  Shared module path not found")
     compute_ndvi_features_sync = None
     compute_ndvi_debug_info = None
 
@@ -106,10 +106,10 @@ def load_local_model():
         local_path = "/tmp/model.joblib"
         model_blob.download_to_filename(local_path)
         LOCAL_MODEL = joblib.load(local_path)
-        print(f"✅ Loaded local model from gs://{MODEL_BUCKET}/{MODEL_PREFIX}")
+        print(f" Loaded local model from gs://{MODEL_BUCKET}/{MODEL_PREFIX}")
         return LOCAL_MODEL
     except Exception as e:
-        print(f"⚠️  Failed to load local model: {e}")
+        print(f"️  Failed to load local model: {e}")
         return None
 
 # Request-scoped correlation id for logging across helpers
@@ -171,9 +171,9 @@ async def options_handler(request: Request) -> Response:
 # Initialize Earth Engine with Application Default Credentials
 try:
     ee.Initialize()
-    print("✅ Earth Engine initialized successfully")
+    print(" Earth Engine initialized successfully")
 except Exception as e:
-    print(f"⚠️ Earth Engine initialization failed: {e}")
+    print(f"️ Earth Engine initialization failed: {e}")
     print("ℹ️ Will attempt to initialize on first request")
 
 # Configuration
@@ -460,7 +460,7 @@ def compute_ndvi_features(polygon_coords: List[Tuple[float, float]], year: int, 
                 ee_debug = compute_ndvi_debug_info(ee_polygon, year)
                 print(f"[{request_id}] EE debug={ee_debug}")
             except Exception as e:
-                print(f"⚠️  EE debug logging failed: {e}")
+                print(f"️  EE debug logging failed: {e}")
 
         # Use shared Earth Engine feature extraction (SINGLE SOURCE OF TRUTH!)
         if compute_ndvi_features_sync:
@@ -480,7 +480,7 @@ def compute_ndvi_features(polygon_coords: List[Tuple[float, float]], year: int, 
             # latitude = raw_features['latitude']
         else:
             # Fallback if shared module not available (shouldn't happen in production)
-            print("⚠️  Shared module not available, using fallback NDVI computation")
+            print("️  Shared module not available, using fallback NDVI computation")
             raise HTTPException(
                 status_code=500,
                 detail="Shared Earth Engine features module not available"
@@ -565,12 +565,12 @@ def predict_crop_type(features: List[float]) -> Tuple[str, float]:
         
         # Log full response for debugging (first few calls)
         if not hasattr(predict_crop_type, '_logged_response'):
-            print(f"🔍 Prediction response type: {type(prediction)}")
-            print(f"🔍 Prediction attributes: {dir(prediction)}")
+            print(f" Prediction response type: {type(prediction)}")
+            print(f" Prediction attributes: {dir(prediction)}")
             if hasattr(prediction, 'predictions'):
-                print(f"🔍 Predictions: {prediction.predictions}")
+                print(f" Predictions: {prediction.predictions}")
             if hasattr(prediction, 'probabilities'):
-                print(f"🔍 Probabilities: {prediction.probabilities}")
+                print(f" Probabilities: {prediction.probabilities}")
             predict_crop_type._logged_response = True
         
         # Parse response - sklearn container format
@@ -589,9 +589,9 @@ def predict_crop_type(features: List[float]) -> Tuple[str, float]:
                 probs = prediction.probabilities[0]
                 if isinstance(probs, (list, np.ndarray)):
                     confidence = float(max(probs))  # Max probability
-                    print(f"✅ Extracted confidence from probabilities: {confidence:.2%}")
+                    print(f" Extracted confidence from probabilities: {confidence:.2%}")
         except Exception as e:
-            print(f"⚠️  Method 1 failed: {e}")
+            print(f"️  Method 1 failed: {e}")
         
         # If still None, try other methods
         if confidence is None:
@@ -604,13 +604,13 @@ def predict_crop_type(features: List[float]) -> Tuple[str, float]:
                             confidence = float(max(probs[0]))
                         else:
                             confidence = float(max(probs))
-                    print(f"✅ Extracted confidence from dict probabilities: {confidence:.2%}")
+                    print(f" Extracted confidence from dict probabilities: {confidence:.2%}")
             except Exception as e:
-                print(f"⚠️  Method 2 failed: {e}")
+                print(f"️  Method 2 failed: {e}")
         
         # If still None, log warning (but don't fake a value)
         if confidence is None:
-            print(f"⚠️  No confidence/probabilities available in response - returning None")
+            print(f"️  No confidence/probabilities available in response - returning None")
             print(f"   Response format: {type(pred)}, Value: {pred}")
         
         # Extract crop prediction
@@ -655,9 +655,9 @@ def predict_crop_type(features: List[float]) -> Tuple[str, float]:
         # Ensure confidence is between 0 and 1 (only if we have a value)
         if confidence is not None:
             confidence = max(0.0, min(1.0, confidence))
-            print(f"🔮 Prediction: {crop} (confidence: {confidence:.2%})")
+            print(f" Prediction: {crop} (confidence: {confidence:.2%})")
         else:
-            print(f"🔮 Prediction: {crop} (confidence: None - not available)")
+            print(f" Prediction: {crop} (confidence: None - not available)")
     
         return crop, confidence
     
@@ -805,7 +805,7 @@ def generate_grid_cells(coords: List[Tuple[float, float]], cell_size_meters: int
     # Create polygon and fix any invalid geometries (self-intersections, etc.)
     poly = Polygon(coords)
     if not poly.is_valid:
-        print(f"⚠️  Invalid polygon detected (self-intersection), attempting to fix...")
+        print(f"️  Invalid polygon detected (self-intersection), attempting to fix...")
         poly = poly.buffer(0)  # Fix self-intersections and invalid geometries
         if not poly.is_valid:
             raise ValueError("Polygon is invalid and cannot be fixed automatically. Please redraw the field boundary without crossing edges.")
@@ -1046,7 +1046,7 @@ async def analyze_field_single(coords: List[Tuple[float, float]], area_acres: fl
         timestamp=datetime.utcnow().isoformat()
     )
     
-    print(f"✅ Single prediction: {crop} ({confidence:.0%}), ${income['avg']:.0f}/year")
+    print(f" Single prediction: {crop} ({confidence:.0%}), ${income['avg']:.0f}/year")
     
     return response
 
@@ -1227,7 +1227,7 @@ async def analyze_field_grid(coords: List[Tuple[float, float]], area_acres: floa
     )
     
     # Print summary
-    print(f"✅ Grid analysis complete:")
+    print(f" Grid analysis complete:")
     for zone in zones:
         print(f"   - {zone['crop']}: {zone['area_acres']:.1f} acres ({zone['percentage']:.0f}%)")
     print(f"   Total income: ${total_co2_avg:.0f}/year")

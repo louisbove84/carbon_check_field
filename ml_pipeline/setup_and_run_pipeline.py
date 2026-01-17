@@ -40,7 +40,7 @@ TRAINING_BUCKET = f'{PROJECT_ID}-training'
 def create_gcs_buckets():
     """Create required GCS buckets"""
     logger.info("=" * 70)
-    logger.info("📦 CREATING GCS BUCKETS")
+    logger.info(" CREATING GCS BUCKETS")
     logger.info("=" * 70)
     
     storage_client = storage.Client(project=PROJECT_ID)
@@ -54,20 +54,20 @@ def create_gcs_buckets():
         try:
             bucket = storage_client.bucket(bucket_name)
             if bucket.exists():
-                logger.info(f"  ✅ Bucket {bucket_name} already exists")
+                logger.info(f"   Bucket {bucket_name} already exists")
             else:
                 bucket.location = location
                 bucket.create()
-                logger.info(f"  ✅ Created bucket: {bucket_name} in {location}")
+                logger.info(f"   Created bucket: {bucket_name} in {location}")
         except Exception as e:
-            logger.error(f"  ❌ Failed to create {bucket_name}: {e}")
+            logger.error(f"   Failed to create {bucket_name}: {e}")
             raise
 
 def upload_config_to_gcs():
     """Upload config.yaml to GCS"""
     logger.info("")
     logger.info("=" * 70)
-    logger.info("📤 UPLOADING CONFIG TO GCS")
+    logger.info(" UPLOADING CONFIG TO GCS")
     logger.info("=" * 70)
     
     storage_client = storage.Client(project=PROJECT_ID)
@@ -77,13 +77,13 @@ def upload_config_to_gcs():
     config_path = os.path.join(os.path.dirname(__file__), 'orchestrator', 'config.yaml')
     blob = bucket.blob('config/config.yaml')
     blob.upload_from_filename(config_path)
-    logger.info(f"  ✅ Uploaded config to gs://{DATA_BUCKET}/config/config.yaml")
+    logger.info(f"   Uploaded config to gs://{DATA_BUCKET}/config/config.yaml")
 
 def create_tensorboard_instance():
     """Create TensorBoard instance"""
     logger.info("")
     logger.info("=" * 70)
-    logger.info("📊 CREATING TENSORBOARD INSTANCE")
+    logger.info(" CREATING TENSORBOARD INSTANCE")
     logger.info("=" * 70)
     
     aiplatform.init(project=PROJECT_ID, location=REGION)
@@ -93,7 +93,7 @@ def create_tensorboard_instance():
         instances = tensorboard.Tensorboard.list()
         if instances:
             instance = list(instances)[0]
-            logger.info(f"  ✅ TensorBoard instance already exists: {instance.display_name}")
+            logger.info(f"   TensorBoard instance already exists: {instance.display_name}")
             logger.info(f"     Resource: {instance.resource_name}")
             return instance.resource_name
         
@@ -103,7 +103,7 @@ def create_tensorboard_instance():
             display_name="Crop Classifier Training",
             description="TensorBoard for crop classification model training metrics and visualizations"
         )
-        logger.info(f"  ✅ Created TensorBoard instance: {tb_instance.display_name}")
+        logger.info(f"   Created TensorBoard instance: {tb_instance.display_name}")
         logger.info(f"     Resource: {tb_instance.resource_name}")
         
         # Update config with TensorBoard instance ID
@@ -114,14 +114,14 @@ def create_tensorboard_instance():
         return tb_instance.resource_name
         
     except Exception as e:
-        logger.error(f"  ❌ Failed to create TensorBoard: {e}")
+        logger.error(f"   Failed to create TensorBoard: {e}")
         raise
 
 def create_bigquery_resources():
     """Create BigQuery dataset and tables if they don't exist"""
     logger.info("")
     logger.info("=" * 70)
-    logger.info("📊 CREATING BIGQUERY RESOURCES")
+    logger.info(" CREATING BIGQUERY RESOURCES")
     logger.info("=" * 70)
     
     bq_client = bigquery.Client(project=PROJECT_ID)
@@ -131,12 +131,12 @@ def create_bigquery_resources():
     dataset_ref = bq_client.dataset(dataset_id)
     try:
         dataset = bq_client.get_dataset(dataset_ref)
-        logger.info(f"  ✅ Dataset {dataset_id} already exists")
+        logger.info(f"   Dataset {dataset_id} already exists")
     except Exception:
         dataset = bigquery.Dataset(dataset_ref)
         dataset.location = REGION
         dataset = bq_client.create_dataset(dataset, exists_ok=True)
-        logger.info(f"  ✅ Created dataset: {dataset_id}")
+        logger.info(f"   Created dataset: {dataset_id}")
     
     # Tables will be created automatically by the pipeline when data is exported
     logger.info("  ℹ️  Tables will be created automatically during data export")
@@ -145,7 +145,7 @@ def run_full_pipeline():
     """Run the complete ML pipeline"""
     logger.info("")
     logger.info("=" * 70)
-    logger.info("🚀 RUNNING FULL PIPELINE")
+    logger.info(" RUNNING FULL PIPELINE")
     logger.info("=" * 70)
     
     # Import orchestrator
@@ -158,7 +158,7 @@ def run_full_pipeline():
     if result['status'] == 'success':
         logger.info("")
         logger.info("=" * 70)
-        logger.info("✅ PIPELINE COMPLETE")
+        logger.info(" PIPELINE COMPLETE")
         logger.info("=" * 70)
         logger.info(f"Duration: {result.get('duration_minutes', 0):.1f} minutes")
         if 'training' in result:
@@ -166,7 +166,7 @@ def run_full_pipeline():
     else:
         logger.error("")
         logger.error("=" * 70)
-        logger.error("❌ PIPELINE FAILED")
+        logger.error(" PIPELINE FAILED")
         logger.error("=" * 70)
         logger.error(f"Error: {result.get('error', 'Unknown error')}")
     
@@ -176,7 +176,7 @@ def main():
     """Main setup and execution"""
     logger.info("")
     logger.info("=" * 70)
-    logger.info("🌾 ML PIPELINE SETUP AND EXECUTION")
+    logger.info(" ML PIPELINE SETUP AND EXECUTION")
     logger.info("=" * 70)
     logger.info(f"Project: {PROJECT_ID}")
     logger.info(f"Region: {REGION}")
@@ -200,7 +200,7 @@ def main():
         
         logger.info("")
         logger.info("=" * 70)
-        logger.info("✅ SETUP AND PIPELINE COMPLETE")
+        logger.info(" SETUP AND PIPELINE COMPLETE")
         logger.info("=" * 70)
         
         return result
@@ -208,7 +208,7 @@ def main():
     except Exception as e:
         logger.error("")
         logger.error("=" * 70)
-        logger.error("❌ SETUP FAILED")
+        logger.error(" SETUP FAILED")
         logger.error("=" * 70)
         logger.error(f"Error: {e}", exc_info=True)
         raise

@@ -1,4 +1,4 @@
-# CarbonCheck Field 🌾
+# CarbonCheck Field 
 
 A Flutter app that helps farmers analyze crop types and estimate carbon credit income using satellite imagery and AI.
 
