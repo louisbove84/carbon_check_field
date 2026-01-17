@@ -126,7 +126,7 @@ app.add_middleware(
         "https://www.beuxbunk.com",
         # Add any additional production domains here
     ],
-    allow_origin_regex=r"https?://.*\.beuxbunk\.com$|https?://.*\.vercel\.app$",
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$|https?://.*\.beuxbunk\.com$|https?://.*\.vercel\.app$",
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
