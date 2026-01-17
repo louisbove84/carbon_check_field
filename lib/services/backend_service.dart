@@ -206,7 +206,7 @@ class BackendService {
       var dominantZone = cropZonesJson.first;
       double maxArea = 0;
       for (var zone in cropZonesJson) {
-        final zoneArea = (zone['area_acres'] as num).toDouble();
+        final zoneArea = (zone['area_acres'] as num?)?.toDouble() ?? 0.0;
         if (zoneArea > maxArea) {
           maxArea = zoneArea;
           dominantZone = zone;
@@ -219,7 +219,7 @@ class BackendService {
       final confidenceAvailable = zones.every((z) => z.confidence != null);
       for (var zone in cropZonesJson) {
         final confidence = (zone['confidence'] as num?)?.toDouble() ?? 0.0;
-        final percentage = (zone['percentage'] as num).toDouble();
+        final percentage = (zone['percentage'] as num?)?.toDouble() ?? 0.0;
         weightedConfidence += confidence * (percentage / 100);
       }
       if (!confidenceAvailable) {

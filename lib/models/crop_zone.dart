@@ -44,16 +44,16 @@ class CropZone {
     // Parse polygon coordinates
     final polygonCoords = (json['polygon'] as List<dynamic>)
         .map((coord) => LatLng(
-              (coord[1] as num).toDouble(), // lat
-              (coord[0] as num).toDouble(), // lng
+              (coord[1] as num?)?.toDouble() ?? 0.0, // lat
+              (coord[0] as num?)?.toDouble() ?? 0.0, // lng
             ))
         .toList();
 
     return CropZone(
       crop: json['crop'] as String,
       confidence: (json['confidence'] as num?)?.toDouble(),
-      areaAcres: (json['area_acres'] as num).toDouble(),
-      percentage: (json['percentage'] as num).toDouble(),
+      areaAcres: (json['area_acres'] as num?)?.toDouble() ?? 0.0,
+      percentage: (json['percentage'] as num?)?.toDouble() ?? 0.0,
       polygon: polygonCoords,
     );
   }
