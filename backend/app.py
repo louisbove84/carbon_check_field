@@ -1045,6 +1045,7 @@ async def analyze_field_grid(coords: List[Tuple[float, float]], area_acres: floa
         batch = cells[i:i+batch_size]
         
         for cell_idx, cell in enumerate(batch):
+            cell_number = i * batch_size + cell_idx + 1
             try:
                 # Get cell coordinates
                 cell_coords = list(cell.exterior.coords)
@@ -1053,7 +1054,6 @@ async def analyze_field_grid(coords: List[Tuple[float, float]], area_acres: floa
                 features = compute_ndvi_features(cell_coords, year, debug=cell_number <= 2)
 
                 # Log first few cells for debugging
-                cell_number = i * batch_size + cell_idx + 1
                 if cell_number <= 5:
                     feature_log = dict(zip(FEATURE_NAMES, features))
                     print(f"[{request_id}] Cell {cell_number} features={feature_log}")
