@@ -34,27 +34,30 @@
   
   <!-- Load API key configuration from local dev (optional) -->
   <script src="/config.local.js"></script>
-  <!-- Load API key configuration from server (only in deployed env) -->
+  
+  <!-- Google Maps JavaScript API (key loaded from config.local.js or /api) -->
   <script>
-    if (location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+    function loadMapsWithKey() {
+      const mapsKey = typeof GOOGLE_MAPS_API_KEY !== 'undefined'
+        ? GOOGLE_MAPS_API_KEY
+        : undefined;
+      if (mapsKey) {
+        const script = document.createElement('script');
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${mapsKey}`;
+        document.head.appendChild(script);
+      } else {
+        console.error('GOOGLE_MAPS_API_KEY not found. For local dev, create web/config.local.js');
+      }
+    }
+
+    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+      loadMapsWithKey();
+    } else {
       const cfg = document.createElement('script');
       cfg.src = '/api/carboncheck-config.js';
+      cfg.onload = loadMapsWithKey;
+      cfg.onerror = () => console.error('Failed to load /api/carboncheck-config.js');
       document.head.appendChild(cfg);
-    }
-  </script>
-  
-  <!-- Google Maps JavaScript API (key loaded from config.js) -->
-  <script>
-    // Load Google Maps API with key from config.js (local or server)
-    const mapsKey = typeof GOOGLE_MAPS_API_KEY !== 'undefined'
-      ? GOOGLE_MAPS_API_KEY
-      : undefined;
-    if (mapsKey) {
-      const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${mapsKey}`;
-      document.head.appendChild(script);
-    } else {
-      console.error('GOOGLE_MAPS_API_KEY not found. For local dev, create web/config.local.js');
     }
   </script>
 </head>
