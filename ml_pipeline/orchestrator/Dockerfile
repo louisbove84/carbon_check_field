@@ -16,6 +16,9 @@ COPY orchestrator/orchestrator.py .
 COPY orchestrator/earth_engine_collector.py .
 COPY orchestrator/config.yaml .
 
+# Copy trainer code so orchestrator can upload it to GCS at runtime
+COPY trainer /app/trainer
+
 # Environment variables
 ENV PORT=8080
 ENV PYTHONUNBUFFERED=1

@@ -340,7 +340,11 @@ def upload_training_code(vertex_bucket, timestamp):
     
     # Get the directory where this script is located
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    ml_pipeline_dir = os.path.dirname(script_dir)  # Go up one level from orchestrator/
+    # In Cloud Run image, trainer lives under /app/trainer
+    if os.path.exists(os.path.join(script_dir, 'trainer')):
+        ml_pipeline_dir = script_dir
+    else:
+        ml_pipeline_dir = os.path.dirname(script_dir)  # Local: go up one level from orchestrator/
     
     code_files = [
         'trainer/vertex_ai_training.py',
