@@ -49,7 +49,7 @@ For **local development and testing**, use:
 
 These are **NOT used in GCP deployments** - they're only for local setup.
 
-** See [Installation Guide](docs/INSTALLATION.md) for detailed local setup instructions.**
+** See [Quick Start Guide](docs/QUICK_START.md) for detailed local setup instructions.**
 
 ## Building and Deploying
 
@@ -95,4 +95,4 @@ pip install -e ".[all]"
 
 But remember: **GCP uses the individual requirements.txt files**, not the consolidated one!
 
-** See [Installation Guide](docs/INSTALLATION.md) for complete setup instructions.**
+** See [Quick Start Guide](docs/QUICK_START.md) for complete setup instructions.**
