@@ -110,6 +110,23 @@ curl -X POST https://ml-pipeline-6by67xpgga-uc.a.run.app
 
 ---
 
+## Scheduled Monthly Retraining (Cloud Scheduler)
+
+Create a monthly Cloud Scheduler job that calls the orchestrator endpoint.
+
+```bash
+gcloud scheduler jobs create http carboncheck-monthly-retrain \
+  --schedule="0 3 1 * *" \
+  --uri="https://ml-pipeline-6by67xpgga-uc.a.run.app" \
+  --http-method=POST \
+  --time-zone="America/Chicago" \
+  --location="us-central1"
+```
+
+Notes:
+- This uses unauthenticated access (current Cloud Run config allows it).
+- If you restrict Cloud Run, add `--oidc-service-account-email` and grant the Scheduler SA access.
+
 ##  Monitoring
 
 ### View Orchestrator Logs

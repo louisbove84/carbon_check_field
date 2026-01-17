@@ -27,7 +27,11 @@ from torch.utils.tensorboard import SummaryWriter
 
 # Import local modules (all files are in /app)
 from feature_engineering import engineer_features_dataframe
-from tensorboard_logging import run_comprehensive_evaluation, log_training_metrics_to_tensorboard
+from tensorboard_logging import (
+    run_comprehensive_evaluation,
+    log_training_metrics_to_tensorboard,
+    log_data_skew_to_tensorboard
+)
 
 # Configure logging
 logging.basicConfig(
@@ -164,7 +168,7 @@ def train_model(df, feature_cols, config):
         'classification_report': classification_report(y_test, test_pred, output_dict=True, zero_division=0)
     }
     
-    return pipeline, metrics, X_test, y_test, test_pred
+    return pipeline, metrics, X_test, y_test, y_train, test_pred
 
 
 def save_model(pipeline, feature_cols, metrics, config):
@@ -266,7 +270,7 @@ if __name__ == '__main__':
         df_enhanced, feature_cols = engineer_features(df, config)
         
         # Train model
-        pipeline, metrics, X_test, y_test, y_pred = train_model(df_enhanced, feature_cols, config)
+        pipeline, metrics, X_test, y_test, y_train, y_pred = train_model(df_enhanced, feature_cols, config)
         
         # === TENSORBOARD LOGGING ===
         # CRITICAL: SummaryWriter cannot write directly to GCS paths
@@ -358,8 +362,9 @@ if __name__ == '__main__':
             num_runs=1  # SIMPLIFIED: Just log once, no progression
         )
         
-        # Log training metrics
+        # Log training metrics and data skew
         log_training_metrics_to_tensorboard(writer, config, metrics, y_test, y_pred)
+        log_data_skew_to_tensorboard(writer, y_train, y_test)
         
         # Log key metrics to Vertex AI Experiments (for UI display)
         try:

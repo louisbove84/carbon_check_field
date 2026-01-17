@@ -175,6 +175,33 @@ def log_training_metrics_to_tensorboard(writer, config, metrics, y_test, y_pred)
     logger.info("✅ Logged training metrics")
 
 
+def log_data_skew_to_tensorboard(writer, y_train, y_test):
+    """Log class distribution and skew metrics to TensorBoard."""
+    train_counts = pd.Series(y_train).value_counts()
+    test_counts = pd.Series(y_test).value_counts()
+    labels = sorted(set(train_counts.index).union(set(test_counts.index)))
+
+    total_train = train_counts.sum()
+    total_test = test_counts.sum()
+
+    for label in labels:
+        train_pct = float(train_counts.get(label, 0) / total_train) if total_train else 0.0
+        test_pct = float(test_counts.get(label, 0) / total_test) if total_test else 0.0
+        writer.add_scalar(f'data_skew/train_pct/{label}', train_pct, 0)
+        writer.add_scalar(f'data_skew/test_pct/{label}', test_pct, 0)
+
+    if labels:
+        train_max = float(train_counts.max()) if not train_counts.empty else 0.0
+        train_min = float(train_counts.min()) if not train_counts.empty else 0.0
+        test_max = float(test_counts.max()) if not test_counts.empty else 0.0
+        test_min = float(test_counts.min()) if not test_counts.empty else 0.0
+
+        writer.add_scalar('data_skew/train_max_min_ratio', (train_max / train_min) if train_min else 0.0, 0)
+        writer.add_scalar('data_skew/test_max_min_ratio', (test_max / test_min) if test_min else 0.0, 0)
+
+    logger.info("✅ Logged data skew metrics")
+
+
 def run_comprehensive_evaluation(model, X_test, y_test, feature_names, writer, step=0, num_runs=1):
     """
     SIMPLIFIED: Run comprehensive evaluation and log to TensorBoard.
