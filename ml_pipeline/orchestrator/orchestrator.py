@@ -38,6 +38,13 @@ def load_config():
 config = load_config()
 
 
+def refresh_config():
+    """Reload config and update the global reference."""
+    global config
+    config = load_config()
+    return config
+
+
 def run_training_only():
     """
     Run only the training step (skip data collection and deployment).
@@ -52,6 +59,7 @@ def run_training_only():
     logger.info("=" * 70)
     
     try:
+        refresh_config()
         # Trigger Vertex AI Training Job
         logger.info("STEP 1: Trigger Vertex AI Custom Training Job")
         logger.info("-" * 70)
@@ -100,6 +108,7 @@ def run_pipeline():
     logger.info("=" * 70)
     
     try:
+        refresh_config()
         # Step 1: Export Earth Engine data to GCS
         logger.info("STEP 1: Export Earth Engine data to Cloud Storage")
         logger.info("-" * 70)
@@ -167,6 +176,9 @@ def export_earth_engine_data():
         dict with export results
     """
     try:
+        # Ensure config is loaded even if module import failed earlier
+        if 'config' not in globals() or config is None:
+            refresh_config()
         # Import Earth Engine collector (same directory)
         import sys
         import os

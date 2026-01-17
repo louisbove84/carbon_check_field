@@ -8,6 +8,8 @@ PROJECT_ID="ml-pipeline-477612"
 REGION="us-central1"
 SERVICE_NAME="ml-pipeline"
 IMAGE_NAME="gcr.io/${PROJECT_ID}/ml-orchestrator"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 echo "============================================================"
 echo "🚀 DEPLOYING ML ORCHESTRATOR TO CLOUD RUN"
@@ -16,13 +18,17 @@ echo ""
 
 # Upload config to Cloud Storage
 echo "📤 Uploading config..."
-gsutil cp config.yaml gs://carboncheck-data/config/config.yaml
+gsutil cp "${SCRIPT_DIR}/config.yaml" gs://carboncheck-data/config/config.yaml
 echo "✅ Config uploaded"
 echo ""
 
-# Build Docker image
+# Build Docker image (use repo root as context)
 echo "🔨 Building orchestrator image..."
-gcloud builds submit --tag ${IMAGE_NAME} --project=${PROJECT_ID} --quiet
+gcloud builds submit \
+  --config "${ROOT_DIR}/cloudbuild.orchestrator.yaml" \
+  "${ROOT_DIR}" \
+  --project="${PROJECT_ID}" \
+  --quiet
 echo "✅ Image built"
 echo ""
 
