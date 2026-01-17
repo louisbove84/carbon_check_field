@@ -382,6 +382,23 @@ def get_cdl_crop_type(polygon_coords: List[Tuple[float, float]], year: int) -> O
 # EARTH ENGINE - NDVI FEATURE COMPUTATION
 # ============================================================================
 
+FEATURE_NAMES = [
+    "ndvi_mean",
+    "ndvi_std",
+    "ndvi_min",
+    "ndvi_max",
+    "ndvi_p25",
+    "ndvi_p50",
+    "ndvi_p75",
+    "ndvi_early",
+    "ndvi_late",
+    "ndvi_range",
+    "ndvi_iqr",
+    "ndvi_change",
+    "ndvi_early_ratio",
+    "ndvi_late_ratio",
+]
+
 def compute_ndvi_features(polygon_coords: List[Tuple[float, float]], year: int) -> List[float]:
     """
     Compute 15 NDVI features from Sentinel-2 imagery for a given polygon.
@@ -940,9 +957,14 @@ async def analyze_field_single(coords: List[Tuple[float, float]], area_acres: fl
     
     # Compute NDVI features via Earth Engine
     features = compute_ndvi_features(coords, year)
+
+    request_id = request_id_ctx.get()
+    feature_log = dict(zip(FEATURE_NAMES, features))
+    print(f"[{request_id}] Single features={feature_log}")
     
     # Predict crop type via Vertex AI
     crop, confidence = predict_crop_type(features)
+    print(f"[{request_id}] Single prediction crop={crop} confidence={confidence}")
     
     # Validate prediction - reject non-crop areas (parking lots, buildings, etc.)
     validate_crop_prediction(crop)
@@ -1007,6 +1029,7 @@ async def analyze_field_grid(coords: List[Tuple[float, float]], area_acres: floa
     
     # Batch process cells in groups of 10 for efficiency
     batch_size = 10
+    request_id = request_id_ctx.get()
     for i in range(0, len(cells), batch_size):
         batch = cells[i:i+batch_size]
         
@@ -1017,9 +1040,17 @@ async def analyze_field_grid(coords: List[Tuple[float, float]], area_acres: floa
                 
                 # Compute NDVI features for this cell
                 features = compute_ndvi_features(cell_coords, year)
+
+                # Log first few cells for debugging
+                cell_number = i * batch_size + cell_idx + 1
+                if cell_number <= 5:
+                    feature_log = dict(zip(FEATURE_NAMES, features))
+                    print(f"[{request_id}] Cell {cell_number} features={feature_log}")
                 
                 # Predict crop type for this cell
                 crop, confidence = predict_crop_type(features)
+                if cell_number <= 5 or crop == "Other":
+                    print(f"[{request_id}] Cell {cell_number} prediction crop={crop} confidence={confidence}")
                 
                 # Skip non-crop cells (parking lots, buildings, etc.) - don't include in results
                 if crop == "Other":
