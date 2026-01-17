@@ -9,8 +9,8 @@ class CropZone {
   /// Crop type (e.g., "Corn", "Soybeans")
   final String crop;
   
-  /// Confidence score for this zone (0.0 to 1.0)
-  final double confidence;
+  /// Confidence score for this zone (0.0 to 1.0), may be null if not provided
+  final double? confidence;
   
   /// Area of this zone in acres
   final double areaAcres;
@@ -30,7 +30,8 @@ class CropZone {
   });
 
   /// Format confidence as percentage
-  String get confidencePercentage => '${(confidence * 100).toStringAsFixed(0)}%';
+  String get confidencePercentage =>
+      confidence == null ? 'N/A' : '${(confidence! * 100).toStringAsFixed(0)}%';
 
   /// Format area with 1 decimal
   String get areaFormatted => '${areaAcres.toStringAsFixed(1)} acres';
@@ -50,7 +51,7 @@ class CropZone {
 
     return CropZone(
       crop: json['crop'] as String,
-      confidence: (json['confidence'] as num).toDouble(),
+      confidence: (json['confidence'] as num?)?.toDouble(),
       areaAcres: (json['area_acres'] as num).toDouble(),
       percentage: (json['percentage'] as num).toDouble(),
       polygon: polygonCoords,
