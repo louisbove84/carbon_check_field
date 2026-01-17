@@ -35,6 +35,7 @@ import time
 import traceback
 import uuid
 import contextvars
+import joblib
 
 # Add feature modules to path (prefer local copies for Cloud Run)
 _base_dir = os.path.dirname(__file__)
@@ -88,6 +89,28 @@ app = FastAPI(
     description="Secure backend for crop classification and carbon credit estimation",
     version="1.0.0"
 )
+
+# Local model cache for probabilities/confidence
+MODEL_BUCKET = os.getenv("MODEL_BUCKET", "carboncheck-data")
+MODEL_PREFIX = os.getenv("MODEL_PREFIX", "models/crop_classifier_latest")
+LOCAL_MODEL = None
+
+def load_local_model():
+    global LOCAL_MODEL
+    if LOCAL_MODEL is not None:
+        return LOCAL_MODEL
+    try:
+        client = storage.Client()
+        bucket = client.bucket(MODEL_BUCKET)
+        model_blob = bucket.blob(f"{MODEL_PREFIX}/model.joblib")
+        local_path = "/tmp/model.joblib"
+        model_blob.download_to_filename(local_path)
+        LOCAL_MODEL = joblib.load(local_path)
+        print(f"✅ Loaded local model from gs://{MODEL_BUCKET}/{MODEL_PREFIX}")
+        return LOCAL_MODEL
+    except Exception as e:
+        print(f"⚠️  Failed to load local model: {e}")
+        return None
 
 # Request-scoped correlation id for logging across helpers
 request_id_ctx = contextvars.ContextVar("request_id", default="unknown")
@@ -507,6 +530,18 @@ def predict_crop_type(features: List[float]) -> Tuple[str, float]:
         Tuple of (crop_name, confidence_score) where confidence is the max probability
     """
     try:
+        # Prefer local model for confidence if available
+        local_model = load_local_model()
+        if local_model is not None:
+            request_id = request_id_ctx.get()
+            probs = local_model.predict_proba([features])[0]
+            classes = local_model.classes_
+            pred_idx = int(np.argmax(probs))
+            crop = str(classes[pred_idx])
+            confidence = float(probs[pred_idx])
+            print(f"[{request_id}] Local model prediction={crop} confidence={confidence:.2%}")
+            return crop, confidence
+
         # Initialize Vertex AI client
         aiplatform.init(project=GCP_PROJECT_ID, location="us-central1")
         
