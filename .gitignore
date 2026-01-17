@@ -84,6 +84,7 @@ ml_pipeline/test_output/
 
 # Web configuration with API keys (generated from .env)
 web/config.js
+web/config.local.js
 build/web/assets/.env
 
 # Flutter/Xcode temp files that can appear during local builds
