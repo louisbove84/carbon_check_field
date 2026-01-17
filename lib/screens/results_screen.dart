@@ -279,17 +279,19 @@ class _ResultsScreenState extends State<ResultsScreen> {
   
   /// Show crop zones on interactive map
   void _showCropZonesMap() {
-    if (_result != null && _result!.hasMultipleZones) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => CropZonesMapScreen(
-            result: _result!,
-            fieldBoundary: widget.fieldData.polygonPoints,
-          ),
-        ),
-      );
+    if (_result == null) {
+      return;
     }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => CropZonesMapScreen(
+          result: _result!,
+          fieldBoundary: widget.fieldData.polygonPoints,
+        ),
+      ),
+    );
   }
 }
 
