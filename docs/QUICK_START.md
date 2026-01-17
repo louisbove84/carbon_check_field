@@ -146,9 +146,9 @@ curl -X POST https://us-central1-ml-pipeline-477612.cloudfunctions.net/auto-retr
 
 ### Quality Gates
 
-✅ **Gate 1:** Absolute minimum accuracy (75%)  
-✅ **Gate 2:** Per-crop F1 score (0.70 each)  
-✅ **Gate 3:** Beat champion by margin (2%)
+ **Gate 1:** Absolute minimum accuracy (75%)  
+ **Gate 2:** Per-crop F1 score (0.70 each)  
+ **Gate 3:** Beat champion by margin (2%)
 
 All gates must pass to deploy!
 
@@ -221,5 +221,5 @@ bq query --use_legacy_sql=false \
 
 ---
 
-**🎉 That's it! Your pipeline is now automated and runs monthly on GCP.**
+** That's it! Your pipeline is now automated and runs monthly on GCP.**
 

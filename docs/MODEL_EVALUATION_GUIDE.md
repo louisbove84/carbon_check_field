@@ -107,19 +107,19 @@ gs://ml-pipeline-artifacts/models/[VERSION]/evaluation/
 
 ### Good Model Characteristics
 
-✅ **Confusion Matrix**: Diagonal is bright, off-diagonals are dark  
-✅ **Per-Crop Metrics**: All F1 scores > 0.85  
-✅ **Feature Importance**: Top features make sense (e.g., NDVI stats dominate)  
-✅ **Misclassifications**: Few patterns, evenly distributed  
-✅ **Advanced Metrics**: Cohen's Kappa > 0.8, MCC > 0.8
+ **Confusion Matrix**: Diagonal is bright, off-diagonals are dark  
+ **Per-Crop Metrics**: All F1 scores > 0.85  
+ **Feature Importance**: Top features make sense (e.g., NDVI stats dominate)  
+ **Misclassifications**: Few patterns, evenly distributed  
+ **Advanced Metrics**: Cohen's Kappa > 0.8, MCC > 0.8
 
 ### Warning Signs
 
-⚠️ **Confusion Matrix**: One crop predicts everything or gets predicted as everything  
-⚠️ **Per-Crop Metrics**: One crop has F1 << 0.7 (needs more/better data)  
-⚠️ **Feature Importance**: Top feature has >50% importance (model relies too heavily on one signal)  
-⚠️ **Misclassifications**: One pair dominates (e.g., 80% of errors are Corn → Soybeans)  
-⚠️ **Advanced Metrics**: Accuracy is high but Cohen's Kappa is low (model is just guessing majority class)
+️ **Confusion Matrix**: One crop predicts everything or gets predicted as everything  
+️ **Per-Crop Metrics**: One crop has F1 << 0.7 (needs more/better data)  
+️ **Feature Importance**: Top feature has >50% importance (model relies too heavily on one signal)  
+️ **Misclassifications**: One pair dominates (e.g., 80% of errors are Corn → Soybeans)  
+️ **Advanced Metrics**: Accuracy is high but Cohen's Kappa is low (model is just guessing majority class)
 
 ---
 
@@ -153,9 +153,9 @@ gs://ml-pipeline-artifacts/models/[VERSION]/evaluation/
 |-------------|-------------|----------------------|
 | **Confusion Matrix** | Basic heatmap | 3 views (count, %, normalized) |
 | **Per-Crop Metrics** | Scalars (hard to compare) | Visual charts + scatter plots |
-| **Feature Importance** | ❌ Not available | ✅ Top 20 + cumulative |
-| **Misclassification Analysis** | ❌ Not available | ✅ Ranked pairs with % |
-| **Advanced Metrics** | ❌ Not available | ✅ Cohen's Kappa, MCC |
+| **Feature Importance** |  Not available |  Top 20 + cumulative |
+| **Misclassification Analysis** |  Not available |  Ranked pairs with % |
+| **Advanced Metrics** |  Not available |  Cohen's Kappa, MCC |
 | **Export Format** | TFEvents (proprietary) | PNG + JSON (portable) |
 | **Usefulness** | Good for training curves | **Better for model diagnostics** |
 

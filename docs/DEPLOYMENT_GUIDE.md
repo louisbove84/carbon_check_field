@@ -3,7 +3,7 @@
 
 ---
 
-## 🏗️ Architecture Overview
+## ️ Architecture Overview
 
 ```
 ┌───────────────────────────────────────────────────────────┐
@@ -29,7 +29,7 @@
 
 ---
 
-## 📦 Folder Structure
+##  Folder Structure
 
 ```
 ml_pipeline/
@@ -52,7 +52,7 @@ ml_pipeline/
 
 ---
 
-## 🚀 Deployment Steps
+##  Deployment Steps
 
 ### Step 1: Build Trainer Container
 
@@ -100,17 +100,17 @@ curl -X POST https://ml-pipeline-6by67xpgga-uc.a.run.app
 ```
 
 **What happens:**
-1. ⚡ Cloud Run orchestrator starts
-2. 📥 Exports Earth Engine data to GCS
-3. 🤖 Triggers Vertex AI training job
+1.  Cloud Run orchestrator starts
+2.  Exports Earth Engine data to GCS
+3.  Triggers Vertex AI training job
 4. ⏳ Monitors training completion
-5. ✅ Evaluates and deploys if gates pass
+5.  Evaluates and deploys if gates pass
 
 **Duration:** ~10-15 minutes total
 
 ---
 
-## 📊 Monitoring
+##  Monitoring
 
 ### View Orchestrator Logs
 ```bash
@@ -129,7 +129,7 @@ gcloud ai custom-jobs list \
 
 ---
 
-## ⚙️ Configuration
+## ️ Configuration
 
 Edit `config.yaml` to change settings:
 
@@ -155,7 +155,7 @@ gsutil cp config.yaml gs://carboncheck-data/config/config.yaml
 
 ---
 
-## 🔄 Scheduled Runs
+##  Scheduled Runs
 
 Set up monthly automated runs with Cloud Scheduler:
 
@@ -173,7 +173,7 @@ gcloud scheduler jobs create http ml-pipeline-monthly \
 
 ---
 
-## 💰 Cost Breakdown
+##  Cost Breakdown
 
 | Component | Duration | Cost per Run |
 |-----------|----------|--------------|
@@ -186,11 +186,11 @@ gcloud scheduler jobs create http ml-pipeline-monthly \
 **Monthly cost (1 run/month):** ~$0.66-$2.16
 
 **vs Old Cloud Functions:** ~$5-7/month  
-**Savings: 60-70%!** 🎉
+**Savings: 60-70%!** 
 
 ---
 
-## 🛠️ Troubleshooting
+## ️ Troubleshooting
 
 ### Orchestrator fails to trigger training
 **Error:** `Permission denied`  
@@ -214,7 +214,7 @@ cd trainer && ./build_docker.sh
 
 ---
 
-## ✅ Testing
+##  Testing
 
 ### Test Orchestrator Locally
 ```bash
@@ -232,13 +232,13 @@ python vertex_ai_training.py
 
 ---
 
-## 📚 Next Steps
+##  Next Steps
 
-1. ✅ Build trainer container (`cd trainer && ./build_docker.sh`)
-2. ✅ Deploy orchestrator (`cd orchestrator && ./deploy.sh`)
-3. ✅ Run pipeline (`curl -X POST <service-url>`)
-4. ✅ Set up Cloud Scheduler for monthly runs
-5. ✅ Monitor BigQuery for metrics
+1.  Build trainer container (`cd trainer && ./build_docker.sh`)
+2.  Deploy orchestrator (`cd orchestrator && ./deploy.sh`)
+3.  Run pipeline (`curl -X POST <service-url>`)
+4.  Set up Cloud Scheduler for monthly runs
+5.  Monitor BigQuery for metrics
 
-**That's it!** Your ML pipeline is now fully automated. 🚀
+**That's it!** Your ML pipeline is now fully automated. 
 
