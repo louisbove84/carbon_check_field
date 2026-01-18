@@ -19,6 +19,12 @@ Flutter app to helps farmers analyze crop types and estimate carbon credit incom
 - ML pipeline: `ml_pipeline/`
 - Docs: `docs/`
 
+## Containers in Use
+
+- Cloud Run (API): `carboncheck-field-api` (FastAPI backend)
+- Cloud Run (Orchestrator): `ml-pipeline` (pipeline trigger + Earth Engine export)
+- Vertex AI Training: `crop-trainer:latest` (custom training container)
+
 ## Key Features
 
 - Draw fields on satellite maps with real-time acreage
