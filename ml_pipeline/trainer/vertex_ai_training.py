@@ -12,6 +12,7 @@ import os
 import sys
 import json
 import logging
+from importlib import metadata
 import joblib
 import yaml
 import pandas as pd
@@ -39,6 +40,31 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+def log_package_versions():
+    """Log key package versions for debugging environment mismatches."""
+    logger.info("📦 Package Versions:")
+    logger.info(f"   python: {sys.version.split()[0]}")
+    packages = [
+        'torch',
+        'tensorboard',
+        'numpy',
+        'pandas',
+        'scikit-learn',
+        'matplotlib',
+        'google-cloud-aiplatform',
+        'google-cloud-storage',
+        'google-cloud-bigquery',
+        'protobuf'
+    ]
+    for package in packages:
+        try:
+            version = metadata.version(package)
+            logger.info(f"   {package}: {version}")
+        except Exception:
+            logger.info(f"   {package}: NOT INSTALLED")
+    logger.info("")
 
 
 def normalize_crop_labels(crop_name):
@@ -242,6 +268,9 @@ if __name__ == '__main__':
     logger.info("")
     logger.info("⚠️  CRITICAL: TensorBoard logs MUST be written to /tmp, NOT AIP_MODEL_DIR")
     logger.info("")
+
+    # Log package versions to debug TensorBoard failures
+    log_package_versions()
     
     # Force reload modules to ensure latest code (now that logger is ready)
     modules_to_reload = ['tensorboard_logging', 'feature_engineering', 'visualization_utils']

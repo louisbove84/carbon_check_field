@@ -33,7 +33,7 @@ bigquery:
 # ============================================================
 tensorboard:
   # TensorBoard instance ID (from Vertex AI Console)
-  instance_id: '3915516126628413440'
+  instance_id: '429849672832516096'
 
 # ============================================================
 # VERTEX AI MODEL
