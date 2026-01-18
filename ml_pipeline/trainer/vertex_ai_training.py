@@ -307,24 +307,28 @@ if __name__ == '__main__':
         
         # Get the GCS destination from Vertex AI
         managed_tb_gcs_dir = os.environ.get('AIP_TENSORBOARD_LOG_DIR')
+        experiment_name = os.environ.get('AIP_TENSORBOARD_EXPERIMENT_NAME', 'crop_training')
         
         # Create a unique run directory for this training run
         # SummaryWriter works best with a dedicated directory per run
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         run_name = f'run_{timestamp}'
         local_tb_base = '/tmp/tensorboard_logs'
-        local_tb_dir = os.path.join(local_tb_base, run_name)
+        local_tb_dir = os.path.join(local_tb_base, experiment_name, run_name)
         os.makedirs(local_tb_dir, exist_ok=True)
         
         logger.info(f"📊 TensorBoard Configuration:")
         if managed_tb_gcs_dir:
             logger.info(f"   AIP_TENSORBOARD_LOG_DIR (GCS): {managed_tb_gcs_dir}")
             logger.info(f"   Local write directory: {local_tb_dir}")
+            logger.info(f"   Experiment: {experiment_name}")
             logger.info(f"   Run name: {run_name}")
             logger.info(f"   Will upload to GCS after logging completes")
         else:
             logger.warning(f"⚠️  AIP_TENSORBOARD_LOG_DIR not set")
-            logger.info(f"   Writing to local: {local_tb_dir}")
+            logger.info(f"   Local write directory: {local_tb_dir}")
+            logger.info(f"   Experiment: {experiment_name}")
+            logger.info(f"   Run name: {run_name}")
         
         # Create writer pointing to LOCAL directory (SummaryWriter needs local filesystem)
         # Use the run-specific directory
@@ -347,7 +351,6 @@ if __name__ == '__main__':
         logger.info(f"   Verified: Local filesystem path (not GCS, not AIP_MODEL_DIR)")
         
         # CRITICAL: Initialize Vertex AI Experiments to register in UI
-        experiment_name = os.environ.get('AIP_TENSORBOARD_EXPERIMENT_NAME', 'crop_training')
         # Use the same run_name we created for TensorBoard directory
         
         # Get TensorBoard instance ID from config
@@ -486,7 +489,7 @@ if __name__ == '__main__':
                     bucket = storage_client.bucket(bucket_name)
                     
                     # Upload all files from local_tb_dir (the run-specific directory)
-                    # Upload to: gs://bucket/prefix/run_name/...
+                    # Upload to: gs://bucket/prefix/experiment/run_name/...
                     # This preserves the directory structure TensorBoard expects
                     uploaded_count = 0
                     uploaded_files = []
@@ -496,13 +499,13 @@ if __name__ == '__main__':
                             local_path = os.path.join(root, file)
                             # Get relative path from local_tb_dir (preserves subdirectories created by SummaryWriter/hparams)
                             rel_path = os.path.relpath(local_path, local_tb_dir)
-                            # Construct GCS path: prefix/run_name/relative_path
+                            # Construct GCS path: prefix/experiment/run_name/relative_path
                             # Remove any leading slashes or dots
                             rel_path = rel_path.lstrip('./').replace('\\', '/')
                             if gcs_prefix:
-                                blob_path = f"{gcs_prefix}/{run_name}/{rel_path}"
+                                blob_path = f"{gcs_prefix}/{experiment_name}/{run_name}/{rel_path}"
                             else:
-                                blob_path = f"{run_name}/{rel_path}"
+                                blob_path = f"{experiment_name}/{run_name}/{rel_path}"
                             
                             blob = bucket.blob(blob_path)
                             blob.upload_from_filename(local_path)
@@ -512,7 +515,7 @@ if __name__ == '__main__':
                     
                     logger.info("")
                     logger.info(f"✅ Uploaded {uploaded_count} TensorBoard files to GCS")
-                    logger.info(f"   GCS location: gs://{bucket_name}/{gcs_prefix}/{run_name}/")
+                    logger.info(f"   GCS location: gs://{bucket_name}/{gcs_prefix}/{experiment_name}/{run_name}/")
                     logger.info(f"   Files uploaded:")
                     for f in uploaded_files[:5]:  # Show first 5 files
                         logger.info(f"      - {f}")
