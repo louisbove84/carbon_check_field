@@ -7,10 +7,27 @@ Flutter app to helps farmers analyze crop types and estimate carbon credit incom
 ## Start Here
 
 - Quick start: [docs/QUICK_START.md](docs/QUICK_START.md)
-- Run locally: [docs/RUNNING.md](docs/RUNNING.md)
-- App sections: [docs/APP_SECTIONS.md](docs/APP_SECTIONS.md)
 - Deployment: [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md)
 - ML evaluation & pipeline: [docs/MODEL_EVALUATION_GUIDE.md](docs/MODEL_EVALUATION_GUIDE.md)
+
+## App Structure
+
+### Flutter App (`lib/`)
+- `main.dart` - Entry point, Firebase init
+- `screens/` - Home, Map, Results, Crop Zones
+- `models/` - FieldData, PredictionResult, CropZone
+- `services/` - Backend + Firebase integration
+- `widgets/` - Reusable UI components
+
+### Backend (`backend/`)
+- `app.py` - FastAPI app (Earth Engine + Vertex AI)
+- `Dockerfile` - Cloud Run container
+- `requirements.txt` - Python dependencies
+
+### ML Pipeline (`ml_pipeline/`)
+- `orchestrator/` - Run pipeline steps and deployment logic
+- `trainer/` - Vertex training code
+- `shared/` - Shared feature extraction
 
 ## Repo Snapshot
 
@@ -35,4 +52,4 @@ Flutter app to helps farmers analyze crop types and estimate carbon credit incom
 
 ## Support
 
-If you hit setup issues, start with `docs/QUICK_START.md` and `docs/RUNNING.md`.
+If you hit setup issues, start with `docs/QUICK_START.md`.

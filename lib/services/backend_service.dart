@@ -196,7 +196,7 @@ class BackendService {
           cropZones: const [],
         );
       }
-
+      
       // Parse crop zones
       final zones = cropZonesJson
           .map((z) => CropZone.fromJson(z as Map<String, dynamic>))

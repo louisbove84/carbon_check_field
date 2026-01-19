@@ -239,6 +239,51 @@ def save_model(pipeline, feature_cols, metrics, config):
     logger.info(f"✅ Model saved to gs://{bucket_name}/{latest_prefix}")
 
 
+def log_gcs_tensorboard_structure(bucket_name, gcs_prefix, experiment_id=None, max_runs=10, max_files=5, stage=""):
+    """Log TensorBoard folder structure in GCS for debugging UI visibility."""
+    try:
+        storage_client = storage.Client()
+        base_prefix = f"{gcs_prefix}/" if gcs_prefix else ""
+        tb_prefix = f"{base_prefix}{experiment_id}/" if experiment_id else base_prefix
+        stage_label = f" ({stage})" if stage else ""
+
+        logger.info(f"🧭 TensorBoard GCS structure{stage_label}:")
+        logger.info(f"   Bucket: {bucket_name}")
+        logger.info(f"   Prefix: {tb_prefix or '[root]'}")
+
+        # List run-level prefixes (first level under experiment_id)
+        run_prefixes = []
+        iterator = storage_client.list_blobs(
+            bucket_name,
+            prefix=tb_prefix,
+            delimiter='/'
+        )
+        for prefix in iterator.prefixes:
+            run_prefixes.append(prefix)
+
+        if not run_prefixes:
+            logger.info("   No run folders found under this prefix.")
+            return
+
+        logger.info(f"   Run folders found: {len(run_prefixes)}")
+        for prefix in run_prefixes[:max_runs]:
+            logger.info(f"   - {prefix}")
+
+        # For the most recent run prefix, list a few files
+        recent_prefix = run_prefixes[-1]
+        logger.info(f"   Inspecting latest run: {recent_prefix}")
+        files_listed = 0
+        for blob in storage_client.list_blobs(bucket_name, prefix=recent_prefix):
+            logger.info(f"      • {blob.name} ({blob.size:,} bytes)")
+            files_listed += 1
+            if files_listed >= max_files:
+                break
+        if files_listed == 0:
+            logger.info("      (No files found under latest run prefix)")
+    except Exception as e:
+        logger.warning(f"⚠️  Could not inspect TensorBoard GCS structure: {e}")
+
+
 if __name__ == '__main__':
     # CRITICAL: Clear Python cache to ensure we're using the latest code
     import sys
@@ -310,13 +355,20 @@ if __name__ == '__main__':
         managed_tb_gcs_dir = os.environ.get('AIP_TENSORBOARD_LOG_DIR')
         managed_tb_gcs_dir_clean = managed_tb_gcs_dir.rstrip('/') if managed_tb_gcs_dir else None
         experiment_name = os.environ.get('AIP_TENSORBOARD_EXPERIMENT_NAME', 'crop-training')
-        experiment_id = re.sub(r'[^a-z0-9-]', '-', experiment_name.lower())
+        experiment_name = experiment_name.lower()
+        # Normalize experiment name to avoid time-suffixed variants (YYYYMMDDHHMMSS)
+        match = re.match(r'^crop-training-(\d{14})$', experiment_name)
+        if match:
+            date_only = match.group(1)[:8]
+            experiment_name = f'crop-training-{date_only}'
+        experiment_id = re.sub(r'[^a-z0-9-]', '-', experiment_name)
         
         # Create a unique run directory for this training run
         # SummaryWriter works best with a dedicated directory per run
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        run_name = f'run_{timestamp}'
-        run_id = run_name.replace('_', '-')
+        # Use hyphens only to match Vertex AI experiment/run ID rules
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        run_name = f'run-{timestamp}'
+        run_id = run_name
         local_tb_base = '/tmp/tensorboard_logs'
         local_tb_dir = os.path.join(local_tb_base, experiment_id, run_id)
         os.makedirs(local_tb_dir, exist_ok=True)
@@ -492,6 +544,13 @@ if __name__ == '__main__':
                     storage_client = storage.Client()
                     bucket = storage_client.bucket(bucket_name)
                     
+                    log_gcs_tensorboard_structure(
+                        bucket_name=bucket_name,
+                        gcs_prefix=gcs_prefix,
+                        experiment_id=experiment_id,
+                        stage="Before upload"
+                    )
+                    
                     # Upload all files from local_tb_dir (the run-specific directory)
                     # Upload to: gs://bucket/prefix/experiment/run_name/...
                     # This preserves the directory structure TensorBoard expects
@@ -528,6 +587,13 @@ if __name__ == '__main__':
                     logger.info("")
                     logger.info("   ⏳ Vertex AI will automatically sync these logs to TensorBoard")
                     logger.info(f"   📊 View in TensorBoard: {managed_tb_gcs_dir_clean}/{experiment_id}/{run_id}/")
+                    
+                    log_gcs_tensorboard_structure(
+                        bucket_name=bucket_name,
+                        gcs_prefix=gcs_prefix,
+                        experiment_id=experiment_id,
+                        stage="After upload"
+                    )
                 else:
                     logger.warning(f"⚠️  Invalid GCS path format: {managed_tb_gcs_dir}")
             except Exception as e:
@@ -543,6 +609,15 @@ if __name__ == '__main__':
         logger.info("⏳ Waiting 10 seconds for Vertex AI to sync files...")
         time.sleep(10)
         logger.info("✅ Sync delay complete")
+
+        # Final TensorBoard summary for quick UI lookup
+        logger.info("🔎 TensorBoard Run Summary:")
+        logger.info(f"   Experiment: {experiment_name} (id: {experiment_id})")
+        logger.info(f"   Run: {run_name} (id: {run_id})")
+        if managed_tb_gcs_dir_clean:
+            logger.info(f"   GCS logs: {managed_tb_gcs_dir_clean}/{experiment_id}/{run_id}/")
+        else:
+            logger.info("   GCS logs: NOT SET (AIP_TENSORBOARD_LOG_DIR missing)")
         
         # Save model
         save_model(pipeline, feature_cols, metrics, config)

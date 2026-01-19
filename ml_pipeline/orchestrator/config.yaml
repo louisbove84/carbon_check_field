@@ -23,7 +23,7 @@ storage:
 bigquery:
   dataset: crop_ml
   tables:
-    training: training_features
+    training: training_features_debug
     holdout: holdout_test_set
     metrics: model_performance
     deployment: deployment_history
@@ -131,7 +131,7 @@ data_collection:
   
   # Data export settings
   overwrite_table: true  # Set to true to clear BigQuery table and start fresh with balanced data
-                          # Set to false to use existing data (skip collection if data exists)
+                         # Set to false to use existing data (skip collection if data exists)
 
 # ============================================================
 # QUALITY GATES (Most commonly adjusted!)

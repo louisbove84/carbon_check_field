@@ -1,86 +1,53 @@
 # Quick Start Guide
 
-## TL;DR - Get Pipeline Running in 15 Minutes
+## TL;DR - Get Pipeline Running in 10-15 Minutes
 
-### 1. Create BigQuery Tables (1 minute)
+### 1. One-time setup + first run (local)
+This script provisions the required GCP resources and runs the ML pipeline once from your machine:
 ```bash
 cd /Users/beuxb/Desktop/Projects/carbon_check_field/ml_pipeline
-bq query --use_legacy_sql=false < setup_evaluation_tables.sql
+python setup_and_run_pipeline.py
 ```
 
-### 2. Deploy Cloud Functions (5 minutes)
-```bash
-# Option A: Use deployment script (recommended - includes config)
-cd /Users/beuxb/Desktop/Projects/carbon_check_field/ml_pipeline
-./deploy_with_config.sh
+**What it does:**
+- Creates GCS buckets
+- Uploads `config.yaml` to GCS
+- Creates TensorBoard instance
+- Creates BigQuery dataset (tables are created during export)
+- Runs the full pipeline (Earth Engine → Training → Deploy)
 
-# Option B: Manual deployment (if you want to customize)
-# Edit deploy_with_config.sh to change configuration values
-# Then run: ./deploy_with_config.sh
+### 2. Re-run the pipeline only (local)
+Requires one-time setup to have been completed (or resources created manually). This runs the pipeline from your machine:
+```bash
+cd /Users/beuxb/Desktop/Projects/carbon_check_field/ml_pipeline/orchestrator
+python orchestrator.py
 ```
 
-**Configuration is now centralized!** Edit `deploy_with_config.sh` to change:
-- Quality gates (accuracy thresholds, F1 requirements)
-- Data collection settings (samples per crop)
-- Model hyperparameters (n_estimators, max_depth, etc.)
-
-See [`CONFIG_MANAGEMENT.md`](CONFIG_MANAGEMENT.md) for details.
-
-### 3. Test Manually (5 minutes)
+### 3. Optional: Deploy the orchestrator to Cloud Run
+`setup_and_run_pipeline.py` does not deploy the orchestrator. Deploying Cloud Run is only needed if you want scheduled or remote runs (Cloud Scheduler/HTTP) without your machine:
 ```bash
-# Test holdout set creation
-./test_pipeline.sh holdout
-
-# Test retraining (takes 5-10 min)
-./test_pipeline.sh retrain
-
-# View metrics
-./test_pipeline.sh metrics
+cd /Users/beuxb/Desktop/Projects/carbon_check_field/ml_pipeline/orchestrator
+./deploy.sh
 ```
 
-### 4. Setup Automation (2 minutes)
+### 4. Optional: Schedule monthly runs (Cloud Scheduler)
+Once you have a Cloud Run URL, schedule a POST to it:
 ```bash
-# Schedule data collection (1st of month)
-gcloud scheduler jobs create http monthly-data-collection-trigger \
-  --schedule="0 0 1 * *" \
-  --uri="https://us-central1-ml-pipeline-477612.cloudfunctions.net/monthly-data-collection" \
-  --http-method=POST --location=us-central1 \
-  --time-zone="America/Chicago"
-
-# Schedule retraining (5th of month)
-gcloud scheduler jobs create http auto-retrain-trigger \
-  --schedule="0 0 5 * *" \
-  --uri="https://us-central1-ml-pipeline-477612.cloudfunctions.net/auto-retrain-model" \
-  --http-method=POST --location=us-central1 \
-  --time-zone="America/Chicago"
-```
-
-### 5. Verify & Monitor (2 minutes)
-```bash
-# Check scheduled jobs
-gcloud scheduler jobs list --location=us-central1
-
-# View recent metrics
-./test_pipeline.sh metrics
-
-# View function logs
-gcloud functions logs read auto-retrain-model --region=us-central1 --limit=50
+gcloud scheduler jobs create http carboncheck-monthly-retrain \
+  --schedule="0 3 1 * *" \
+  --uri="<CLOUD_RUN_SERVICE_URL>" \
+  --http-method=POST \
+  --time-zone="America/Chicago" \
+  --location="us-central1"
 ```
 
 ---
 
-## Testing Commands
-
+## Optional: Create Evaluation Tables
+Evaluation still happens in the pipeline; these tables are only needed if you want to run the extra evaluation queries/tools:
 ```bash
-# Test specific steps
-./test_pipeline.sh holdout      # Create holdout test set
-./test_pipeline.sh collection   # Trigger data collection
-./test_pipeline.sh retrain      # Trigger retraining
-./test_pipeline.sh endpoint     # Test predictions
-./test_pipeline.sh metrics      # View BigQuery metrics
-
-# Run all tests interactively
-./test_pipeline.sh
+cd /Users/beuxb/Desktop/Projects/carbon_check_field/ml_pipeline/tools
+bq query --use_legacy_sql=false < setup_evaluation_tables.sql
 ```
 
 ---
@@ -88,138 +55,29 @@ gcloud functions logs read auto-retrain-model --region=us-central1 --limit=50
 ## Monitoring Commands
 
 ```bash
-# View recent model performance
-bq query --use_legacy_sql=false \
-"SELECT model_type, accuracy, corn_f1, soybeans_f1, evaluation_time 
-FROM \`ml-pipeline-477612.crop_ml.model_performance\` 
-ORDER BY evaluation_time DESC LIMIT 5"
+# Orchestrator logs (Cloud Run)
+gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=ml-pipeline" \
+  --project=ml-pipeline-477612 \
+  --limit=50
 
-# View deployment history
-bq query --use_legacy_sql=false \
-"SELECT deployment_time, deployment_decision, accuracy, gates_failed 
-FROM \`ml-pipeline-477612.crop_ml.deployment_history\` 
-ORDER BY deployment_time DESC LIMIT 5"
+# Vertex AI training jobs
+gcloud ai custom-jobs list \
+  --region=us-central1 \
+  --project=ml-pipeline-477612
 
-# View function logs
-gcloud functions logs read auto-retrain-model --region=us-central1 --limit=100
-
-# View Cloud Scheduler execution history
-gcloud scheduler jobs describe auto-retrain-trigger --location=us-central1
+# Scheduled jobs
+gcloud scheduler jobs list --location=us-central1
 ```
-
----
-
-## Manual Triggers (Testing)
-
-```bash
-# Trigger data collection now
-gcloud scheduler jobs run monthly-data-collection-trigger --location=us-central1
-
-# Trigger retraining now
-gcloud scheduler jobs run auto-retrain-trigger --location=us-central1
-
-# Or use HTTP:
-curl -X POST https://us-central1-ml-pipeline-477612.cloudfunctions.net/auto-retrain-model
-```
-
----
-
-## How It Works
-
-### Automated Monthly Schedule
-
-**Day 1 (1st of month):**
-- Cloud Scheduler triggers `monthly-data-collection`
-- Collects 400 new samples from Earth Engine
-- Adds to BigQuery `training_features` table
-
-**Day 5 (5th of month):**
-- Cloud Scheduler triggers `auto-retrain-model`
-- Creates holdout set (first run only, 20% of data)
-- Trains challenger model on remaining 80%
-- Evaluates challenger vs champion on holdout set
-- **Deploys only if:**
-  - Accuracy ≥ 75%
-  - Each crop F1 ≥ 0.70
-  - Beats champion by ≥ 2%
-- Logs decision to BigQuery
-
-### Quality Gates
-
- **Gate 1:** Absolute minimum accuracy (75%)  
- **Gate 2:** Per-crop F1 score (0.70 each)  
- **Gate 3:** Beat champion by margin (2%)
-
-All gates must pass to deploy!
-
----
-
-## Troubleshooting
-
-### Function fails with timeout
-```bash
-gcloud functions deploy auto-retrain-model --timeout=3600s --update
-```
-
-### Out of memory
-```bash
-gcloud functions deploy auto-retrain-model --memory=8Gi --update
-```
-
-### Deployment always blocked
-Check why:
-```sql
-SELECT deployment_time, gates_failed, reasoning
-FROM `ml-pipeline-477612.crop_ml.deployment_history`
-WHERE deployment_decision = 'blocked'
-ORDER BY deployment_time DESC LIMIT 3
-```
-
-Adjust gates in `tensorboard_utils.py` if too strict.
-
----
-
-## Cost Estimate
-
-- **Data Collection:** ~$1-2/month (runs once, 5-10 min)
-- **Model Retraining:** ~$3-5/month (runs once, 10-15 min)
-- **Vertex AI Endpoint:** ~$50-100/month (always-on serving)
-- **BigQuery Storage:** ~$1/month (few GB)
-- **Total:** ~$55-110/month
 
 ---
 
 ## Full Documentation
 
-- **Complete Setup:** [`DEPLOYMENT_AND_TESTING.md`](DEPLOYMENT_AND_TESTING.md)
+- **Deployment Guide:** [`DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md)
 - **Evaluation System:** [`MODEL_EVALUATION_GUIDE.md`](MODEL_EVALUATION_GUIDE.md)
 - **Main README:** [`../README.md`](../README.md)
 
 ---
 
-## Quick Checks
-
-```bash
-# Are functions deployed?
-gcloud functions list --region=us-central1
-
-# Are schedules active?
-gcloud scheduler jobs list --location=us-central1
-
-# Is endpoint running?
-gcloud ai endpoints list --region=us-central1
-
-# Recent training data?
-bq query --use_legacy_sql=false \
-"SELECT crop, COUNT(*) FROM \`ml-pipeline-477612.crop_ml.training_features\` 
-GROUP BY crop"
-
-# Is holdout set created?
-bq query --use_legacy_sql=false \
-"SELECT COUNT(*) as holdout_samples FROM \`ml-pipeline-477612.crop_ml.holdout_test_set\`"
-```
-
----
-
-** That's it! Your pipeline is now automated and runs monthly on GCP.**
+**That's it!** The pipeline is now set up and can be rerun locally or scheduled via Cloud Run.
 

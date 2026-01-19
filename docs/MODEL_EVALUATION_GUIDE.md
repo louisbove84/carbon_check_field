@@ -4,6 +4,27 @@
 
 The `carbon_check_field` ML pipeline now includes comprehensive model evaluation beyond basic TensorBoard metrics. The new evaluation module provides actionable insights for model performance analysis.
 
+## Table of Contents
+- [Overview](#overview)
+- [What's Included](#whats-included)
+  - [1. Enhanced Confusion Matrix](#1-enhanced-confusion-matrix-confusion_matrix_enhancedpng)
+  - [2. Per-Crop Metrics Chart](#2-per-crop-metrics-chart-per_crop_metricspng)
+  - [3. Feature Importance](#3-feature-importance-feature_importancepng-feature_importancejson)
+  - [4. Misclassification Analysis](#4-misclassification-analysis-misclassification_analysispng-misclassificationsjson)
+  - [5. Advanced Metrics Report](#5-advanced-metrics-report-advanced_metricspng-advanced_metricsjson)
+- [How to Access Results](#how-to-access-results)
+  - [During Training](#during-training)
+  - [After Training](#after-training)
+- [Interpreting Results](#interpreting-results)
+  - [Good Model Characteristics](#good-model-characteristics)
+  - [Warning Signs](#warning-signs)
+- [Example Workflow](#example-workflow)
+  - [Scenario: Model shows 95% accuracy but Cohen's Kappa is only 0.65](#scenario-model-shows-95-accuracy-but-cohens-kappa-is-only-065)
+- [Comparison to TensorBoard](#comparison-to-tensorboard)
+- [Files Generated](#files-generated)
+- [Next Steps](#next-steps)
+- [Questions?](#questions)
+
 ## What's Included
 
 ### 1. **Enhanced Confusion Matrix** (`confusion_matrix_enhanced.png`)

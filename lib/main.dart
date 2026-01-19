@@ -18,13 +18,13 @@ void main() async {
   
   // Load environment variables from .env file (mobile/desktop only)
   if (!kIsWeb) {
-    try {
-      await dotenv.load(fileName: ".env");
-      print('✅ Environment variables loaded');
-    } catch (e) {
-      print('⚠️ Failed to load .env file: $e');
-      print('⚠️ Make sure .env file exists in the project root');
-      // App can still run, but API keys won't be available
+  try {
+    await dotenv.load(fileName: ".env");
+    print('✅ Environment variables loaded');
+  } catch (e) {
+    print('⚠️ Failed to load .env file: $e');
+    print('⚠️ Make sure .env file exists in the project root');
+    // App can still run, but API keys won't be available
     }
   } else {
     print('ℹ️ Skipping .env load on web; using runtime config.');

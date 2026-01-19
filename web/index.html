@@ -42,9 +42,9 @@
         ? GOOGLE_MAPS_API_KEY
         : undefined;
       if (mapsKey) {
-        const script = document.createElement('script');
+      const script = document.createElement('script');
         script.src = `https://maps.googleapis.com/maps/api/js?key=${mapsKey}`;
-        document.head.appendChild(script);
+      document.head.appendChild(script);
       } else {
         console.error('GOOGLE_MAPS_API_KEY not found. For local dev, create web/config.local.js');
       }

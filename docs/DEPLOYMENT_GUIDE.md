@@ -3,28 +3,44 @@
 
 ---
 
+## Table of Contents
+- [Architecture Overview](#architecture-overview)
+- [Folder Structure](#folder-structure)
+- [Service Separation and Dependencies](#service-separation-and-dependencies)
+- [Deployment Steps](#deployment-steps)
+  - [Step 1: One-time setup + first run (local)](#step-1-one-time-setup--first-run-local)
+  - [Step 2: Build trainer container (Cloud Run/Vertex AI)](#step-2-build-trainer-container-cloud-runvertex-ai)
+  - [Step 3: Deploy orchestrator (Cloud Run)](#step-3-deploy-orchestrator-cloud-run)
+  - [Step 4: Run pipeline (Cloud Run)](#step-4-run-pipeline-cloud-run)
+- [Scheduling (Cloud Scheduler)](#scheduling-cloud-scheduler)
+- [Monitoring](#monitoring)
+- [Configuration](#configuration)
+- [Cost Breakdown](#cost-breakdown)
+- [Testing](#testing)
+- [Next Steps](#next-steps)
+
+---
+
 ## ️ Architecture Overview
 
 ```
 ┌───────────────────────────────────────────────────────────┐
-│ HTTP POST Request                                        │
+│ HTTP POST Request                                         │
 └────────────────────┬──────────────────────────────────────┘
                      ↓
 ┌────────────────────────────────────────────────────────────┐
-│ Cloud Run Orchestrator (Lightweight)                      │
-│ - Export Earth Engine data to GCS                         │
-│ - Trigger Vertex AI Training Job                          │
+│ Cloud Run Orchestrator (Lightweight)                       │
+│ - Export Earth Engine data to GCS                          │
+│ - Trigger Vertex AI Training Job                           │
+│   - Vertex AI Custom Training (inside trainer image)       │
+│     - Load data from BigQuery/GCS                          │
+│     - Train RandomForest model                             │
+│     - Save model to GCS                                    │
+│     - Return metrics                                       │
 │ - Monitor training                                         │
-│ - Evaluate & deploy if gates pass                         │
-└────────────────────┬───────────────────────────────────────┘
-                     ↓ triggers
-┌────────────────────────────────────────────────────────────┐
-│ Vertex AI Custom Training (Heavy ML)                      │
-│ - Load data from BigQuery/GCS                             │
-│ - Train RandomForest model                                │
-│ - Save model to GCS                                       │
-│ - Return metrics                                          │
+│ - Evaluate & deploy if gates pass                          │
 └────────────────────────────────────────────────────────────┘
+
 ```
 
 ---
@@ -52,72 +68,76 @@ ml_pipeline/
 
 ---
 
+## Service Separation and Dependencies
+
+This project deploys **separate services**, each with its own container and requirements:
+- **Backend API** → Cloud Run (FastAPI)
+- **ML Orchestrator** → Cloud Run (Flask, lightweight)
+- **ML Trainer** → Vertex AI (training job)
+
+Each service has its own `requirements.txt` that matches its Dockerfile:
+- `backend/requirements.txt` → `backend/Dockerfile`
+- `ml_pipeline/orchestrator/requirements.txt` → `ml_pipeline/orchestrator/Dockerfile`
+- `ml_pipeline/trainer/requirements.txt` → `ml_pipeline/trainer/Dockerfile`
+
+For **local development**, use:
+- `requirements-all.txt` for a consolidated install
+- `pyproject.toml` for editable installs (optional)
+
+GCP deployments use the **service-specific** requirements, not the consolidated one.
+
+---
+
 ##  Deployment Steps
 
-### Step 1: Build Trainer Container
+#### Step 1: One-time setup + first run (local)
+Provision required GCP resources and run the pipeline once from your machine:
+```bash
+cd /Users/beuxb/Desktop/Projects/carbon_check_field/ml_pipeline
+python setup_and_run_pipeline.py
+```
 
+**What this does:**
+- Creates GCS buckets
+- Uploads `config.yaml` to GCS
+- Creates TensorBoard instance
+- Creates BigQuery dataset (tables are created during export)
+- Runs the full pipeline (Earth Engine → Training → Deploy)
+
+---
+
+#### Step 2: Build trainer container (Cloud Run/Vertex AI)
 Build and push the training container to Artifact Registry:
-
 ```bash
 cd trainer
 ./build_docker.sh
 ```
 
-**What this does:**
-- Creates Artifact Registry repository if needed
-- Builds Docker image with ML libraries
-- Pushes to `us-central1-docker.pkg.dev/ml-pipeline-477612/ml-containers/crop-trainer:latest`
-
-**Duration:** ~3-5 minutes
-
 ---
 
-### Step 2: Deploy Orchestrator
-
-Deploy the orchestrator to Cloud Run:
-
+#### Step 3: Deploy orchestrator (Cloud Run)
+Deploy the orchestrator so it can be triggered remotely/scheduled:
 ```bash
 cd orchestrator
 ./deploy.sh
 ```
 
-**What this does:**
-- Uploads `config.yaml` to Cloud Storage
-- Builds lightweight Docker image
-- Deploys to Cloud Run
-- Returns service URL
-
-**Duration:** ~2-3 minutes
-
 ---
 
-### Step 3: Run Pipeline
-
+#### Step 4: Run pipeline (Cloud Run)
 Trigger the complete pipeline with one HTTP request:
-
 ```bash
-curl -X POST https://ml-pipeline-6by67xpgga-uc.a.run.app
+curl -X POST <CLOUD_RUN_SERVICE_URL>
 ```
 
-**What happens:**
-1.  Cloud Run orchestrator starts
-2.  Exports Earth Engine data to GCS
-3.  Triggers Vertex AI training job
-4. ⏳ Monitors training completion
-5.  Evaluates and deploys if gates pass
-
-**Duration:** ~10-15 minutes total
-
 ---
 
-## Scheduled Monthly Retraining (Cloud Scheduler)
-
-Create a monthly Cloud Scheduler job that calls the orchestrator endpoint.
-
+## Scheduling (Cloud Scheduler)
+Create a monthly Cloud Scheduler job that calls the orchestrator endpoint:
 ```bash
 gcloud scheduler jobs create http carboncheck-monthly-retrain \
   --schedule="0 3 1 * *" \
-  --uri="https://ml-pipeline-6by67xpgga-uc.a.run.app" \
+  --uri="<CLOUD_RUN_SERVICE_URL>" \
   --http-method=POST \
   --time-zone="America/Chicago" \
   --location="us-central1"
@@ -172,62 +192,20 @@ gsutil cp config.yaml gs://carboncheck-data/config/config.yaml
 
 ---
 
-##  Scheduled Runs
-
-Set up monthly automated runs with Cloud Scheduler:
-
-```bash
-# Create Cloud Scheduler job
-gcloud scheduler jobs create http ml-pipeline-monthly \
-  --location=us-central1 \
-  --schedule="0 0 1 * *" \
-  --uri="https://ml-pipeline-6by67xpgga-uc.a.run.app" \
-  --http-method=POST \
-  --project=ml-pipeline-477612
-```
-
-**Schedule:** Runs on the 1st of every month at midnight
-
----
-
 ##  Cost Breakdown
 
-| Component | Duration | Cost per Run |
-|-----------|----------|--------------|
-| **Cloud Run orchestrator** | 1-2 min | ~$0.10 |
-| **Vertex AI training (n1-standard-4)** | 5-10 min | ~$0.50-$2.00 |
-| **Cloud Storage** | - | ~$0.01 |
-| **BigQuery** | - | ~$0.05 |
-| **Total per run** | ~10-15 min | **~$0.66-$2.16** |
+| Component                         | Duration   | Cost per Run     |
+|-----------------------------------|------------|------------------|
+| **Cloud Run orchestrator**        | 1-2 min    | ~$0.10           |
+| **Vertex AI training (n1-std-4)** | 5-10 min   | ~$0.50-$2.00     |
+| **Cloud Storage**                 | -          | ~$0.01           |
+| **BigQuery**                      | -          | ~$0.05           |
+| **Total per run**                 | ~10-15 min | **~$0.66-$2.16** |
 
 **Monthly cost (1 run/month):** ~$0.66-$2.16
 
 **vs Old Cloud Functions:** ~$5-7/month  
 **Savings: 60-70%!** 
-
----
-
-## ️ Troubleshooting
-
-### Orchestrator fails to trigger training
-**Error:** `Permission denied`  
-**Fix:** Ensure service account has `aiplatform.customJobs.create` permission:
-```bash
-gcloud projects add-iam-policy-binding ml-pipeline-477612 \
-  --member="serviceAccount:ml-pipeline-sa@ml-pipeline-477612.iam.gserviceaccount.com" \
-  --role="roles/aiplatform.user"
-```
-
-### Training job fails
-**Error:** `Container image not found`  
-**Fix:** Rebuild trainer container:
-```bash
-cd trainer && ./build_docker.sh
-```
-
-### Model doesn't deploy
-**Error:** `Quality gates failed`  
-**Fix:** Check logs for accuracy. Lower thresholds in `config.yaml` if needed.
 
 ---
 

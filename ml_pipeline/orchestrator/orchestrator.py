@@ -471,11 +471,23 @@ def trigger_training_job():
         # Extract accuracy (prefer test_accuracy, fallback to accuracy)
         accuracy = metrics.get('test_accuracy', metrics.get('accuracy', 0.0))
         
+        tensorboard_logs_prefix = f'gs://{vertex_bucket}/training_output/logs/{experiment_name}/'
+        if tensorboard_name:
+            logger.info("   📁 TensorBoard logs prefix:")
+            logger.info(f"      {tensorboard_logs_prefix}")
+            logger.info("   ✅ This should contain per-run folders with event files")
+
         return {
             'status': 'success',
             'accuracy': accuracy,
             'job_name': job.display_name,
-            'metrics': metrics
+            'metrics': metrics,
+            'tensorboard': {
+                'instance_id': tensorboard_id,
+                'resource': tensorboard_name,
+                'experiment_name': experiment_name,
+                'logs_prefix': tensorboard_logs_prefix
+            }
         }
     
     except Exception as e:
