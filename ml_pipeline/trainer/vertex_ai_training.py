@@ -316,8 +316,9 @@ if __name__ == '__main__':
         # SummaryWriter works best with a dedicated directory per run
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         run_name = f'run_{timestamp}'
+        run_id = run_name.replace('_', '-')
         local_tb_base = '/tmp/tensorboard_logs'
-        local_tb_dir = os.path.join(local_tb_base, experiment_id, run_name)
+        local_tb_dir = os.path.join(local_tb_base, experiment_id, run_id)
         os.makedirs(local_tb_dir, exist_ok=True)
         
         logger.info(f"📊 TensorBoard Configuration:")
@@ -325,13 +326,13 @@ if __name__ == '__main__':
             logger.info(f"   AIP_TENSORBOARD_LOG_DIR (GCS): {managed_tb_gcs_dir_clean}")
             logger.info(f"   Local write directory: {local_tb_dir}")
             logger.info(f"   Experiment: {experiment_name} (id: {experiment_id})")
-            logger.info(f"   Run name: {run_name}")
+            logger.info(f"   Run name: {run_name} (id: {run_id})")
             logger.info(f"   Will upload to GCS after logging completes")
         else:
             logger.warning(f"⚠️  AIP_TENSORBOARD_LOG_DIR not set")
             logger.info(f"   Local write directory: {local_tb_dir}")
             logger.info(f"   Experiment: {experiment_name} (id: {experiment_id})")
-            logger.info(f"   Run name: {run_name}")
+            logger.info(f"   Run name: {run_name} (id: {run_id})")
         
         # Create writer pointing to LOCAL directory (SummaryWriter needs local filesystem)
         # Use the run-specific directory
@@ -380,8 +381,8 @@ if __name__ == '__main__':
             aiplatform.init(**init_params)
             
             # Start run - this creates it in the Experiments UI
-            aiplatform.start_run(run=run_name)
-            logger.info(f"✅ Started run: {run_name}")
+            aiplatform.start_run(run=run_id)
+            logger.info(f"✅ Started run: {run_id}")
         except Exception as e:
             logger.warning(f"⚠️  Could not start Vertex AI Experiment: {e}")
         
@@ -477,7 +478,7 @@ if __name__ == '__main__':
         if managed_tb_gcs_dir_clean and local_files:
             logger.info(f"📤 Uploading TensorBoard logs to GCS")
             logger.info(f"   Source: {local_tb_dir}")
-            logger.info(f"   Destination: {managed_tb_gcs_dir_clean}/{experiment_id}/{run_name}/")
+            logger.info(f"   Destination: {managed_tb_gcs_dir_clean}/{experiment_id}/{run_id}/")
             try:
                 from google.cloud import storage
                 
@@ -506,9 +507,9 @@ if __name__ == '__main__':
                             # Remove any leading slashes or dots
                             rel_path = rel_path.lstrip('./').replace('\\', '/')
                             if gcs_prefix:
-                                blob_path = f"{gcs_prefix}/{experiment_id}/{run_name}/{rel_path}"
+                                blob_path = f"{gcs_prefix}/{experiment_id}/{run_id}/{rel_path}"
                             else:
-                                blob_path = f"{experiment_id}/{run_name}/{rel_path}"
+                                blob_path = f"{experiment_id}/{run_id}/{rel_path}"
                             
                             blob = bucket.blob(blob_path)
                             blob.upload_from_filename(local_path)
@@ -518,7 +519,7 @@ if __name__ == '__main__':
                     
                     logger.info("")
                     logger.info(f"✅ Uploaded {uploaded_count} TensorBoard files to GCS")
-                    logger.info(f"   GCS location: gs://{bucket_name}/{gcs_prefix}/{experiment_id}/{run_name}/")
+                    logger.info(f"   GCS location: gs://{bucket_name}/{gcs_prefix}/{experiment_id}/{run_id}/")
                     logger.info(f"   Files uploaded:")
                     for f in uploaded_files[:5]:  # Show first 5 files
                         logger.info(f"      - {f}")
@@ -526,7 +527,7 @@ if __name__ == '__main__':
                         logger.info(f"      ... and {len(uploaded_files) - 5} more")
                     logger.info("")
                     logger.info("   ⏳ Vertex AI will automatically sync these logs to TensorBoard")
-                    logger.info(f"   📊 View in TensorBoard: {managed_tb_gcs_dir_clean}/{experiment_id}/{run_name}/")
+                    logger.info(f"   📊 View in TensorBoard: {managed_tb_gcs_dir_clean}/{experiment_id}/{run_id}/")
                 else:
                     logger.warning(f"⚠️  Invalid GCS path format: {managed_tb_gcs_dir}")
             except Exception as e:
