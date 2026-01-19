@@ -307,6 +307,7 @@ if __name__ == '__main__':
         
         # Get the GCS destination from Vertex AI
         managed_tb_gcs_dir = os.environ.get('AIP_TENSORBOARD_LOG_DIR')
+        managed_tb_gcs_dir_clean = managed_tb_gcs_dir.rstrip('/') if managed_tb_gcs_dir else None
         experiment_name = os.environ.get('AIP_TENSORBOARD_EXPERIMENT_NAME', 'crop_training')
         
         # Create a unique run directory for this training run
@@ -319,7 +320,7 @@ if __name__ == '__main__':
         
         logger.info(f"📊 TensorBoard Configuration:")
         if managed_tb_gcs_dir:
-            logger.info(f"   AIP_TENSORBOARD_LOG_DIR (GCS): {managed_tb_gcs_dir}")
+            logger.info(f"   AIP_TENSORBOARD_LOG_DIR (GCS): {managed_tb_gcs_dir_clean}")
             logger.info(f"   Local write directory: {local_tb_dir}")
             logger.info(f"   Experiment: {experiment_name}")
             logger.info(f"   Run name: {run_name}")
@@ -471,16 +472,16 @@ if __name__ == '__main__':
         # CRITICAL: Upload local TensorBoard logs to AIP_TENSORBOARD_LOG_DIR
         # Vertex AI automatically syncs from this location to TensorBoard UI
         # Structure: gs://bucket/training_output/logs/run_TIMESTAMP/events.out.tfevents...
-        if managed_tb_gcs_dir and local_files:
+        if managed_tb_gcs_dir_clean and local_files:
             logger.info(f"📤 Uploading TensorBoard logs to GCS")
             logger.info(f"   Source: {local_tb_dir}")
-            logger.info(f"   Destination: {managed_tb_gcs_dir}/{run_name}/")
+            logger.info(f"   Destination: {managed_tb_gcs_dir_clean}/{experiment_name}/{run_name}/")
             try:
                 from google.cloud import storage
                 
                 # Parse GCS path: gs://bucket/path/to/logs/
-                if managed_tb_gcs_dir.startswith('gs://'):
-                    gcs_path = managed_tb_gcs_dir.replace('gs://', '')
+                if managed_tb_gcs_dir_clean.startswith('gs://'):
+                    gcs_path = managed_tb_gcs_dir_clean.replace('gs://', '')
                     parts = gcs_path.split('/', 1)
                     bucket_name = parts[0]
                     gcs_prefix = parts[1].rstrip('/') if len(parts) > 1 else ''  # Remove trailing slash
@@ -523,7 +524,7 @@ if __name__ == '__main__':
                         logger.info(f"      ... and {len(uploaded_files) - 5} more")
                     logger.info("")
                     logger.info("   ⏳ Vertex AI will automatically sync these logs to TensorBoard")
-                    logger.info(f"   📊 View in TensorBoard: {managed_tb_gcs_dir}/{run_name}/")
+                    logger.info(f"   📊 View in TensorBoard: {managed_tb_gcs_dir_clean}/{experiment_name}/{run_name}/")
                 else:
                     logger.warning(f"⚠️  Invalid GCS path format: {managed_tb_gcs_dir}")
             except Exception as e:
