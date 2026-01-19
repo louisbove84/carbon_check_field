@@ -431,7 +431,7 @@ def trigger_training_job():
         service_account = f'ml-pipeline-sa@{project_id}.iam.gserviceaccount.com'
         
         # Generate experiment name for TensorBoard
-        experiment_name = f'crop_training_{datetime.now().strftime("%Y%m%d")}'
+        experiment_name = f'crop-training-{datetime.now().strftime("%Y%m%d")}'
         
         # Environment variables for TensorBoard integration and code mounting
         env_vars = {
