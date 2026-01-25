@@ -31,8 +31,7 @@ from torch.utils.tensorboard import SummaryWriter
 from feature_engineering import engineer_features_dataframe
 from tensorboard_logging import (
     run_comprehensive_evaluation,
-    log_training_metrics_to_tensorboard,
-    log_data_skew_to_tensorboard
+    log_training_metrics_to_tensorboard
 )
 
 # Configure logging
@@ -450,9 +449,8 @@ if __name__ == '__main__':
             num_runs=1  # SIMPLIFIED: Just log once, no progression
         )
         
-        # Log training metrics and data skew
+        # Log training metrics
         log_training_metrics_to_tensorboard(writer, config, metrics, y_test, y_pred)
-        log_data_skew_to_tensorboard(writer, y_train, y_test)
         
         # Log key metrics to Vertex AI Experiments (for UI display)
         try:

@@ -1,0 +1,28 @@
+# Cloud Build configuration for Skew Audit Service
+# =================================================
+
+steps:
+  # Build the skew audit container
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/ml-containers/skew-audit:latest'
+      - '-f'
+      - 'skew_job/Dockerfile'
+      - '.'
+
+  # Push to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/ml-containers/skew-audit:latest'
+
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/ml-containers/skew-audit:latest'
+
+substitutions:
+  _REGION: us-central1
+
+options:
+  logging: CLOUD_LOGGING_ONLY

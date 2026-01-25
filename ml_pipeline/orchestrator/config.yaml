@@ -33,7 +33,8 @@ bigquery:
 # ============================================================
 tensorboard:
   # TensorBoard instance ID (from Vertex AI Console)
-  instance_id: '429849672832516096'
+  # Run: gcloud ai tensorboards list --region=us-central1 to see available instances
+  instance_id: '1778818498718334976'
 
 # ============================================================
 # VERTEX AI MODEL
@@ -61,7 +62,7 @@ model:
 # ============================================================
 data_collection:
   samples_per_crop: 1000  # Samples collected per crop each month (legacy, use num_fields_per_crop instead)
-  num_fields_per_crop: 30  # Number of fields to sample per crop
+  num_fields_per_crop: 300  # Number of fields to sample per crop (10x)
   num_samples_per_field: 3  # Number of samples per field
   cdl_year: 2024  # CDL year to use for crop verification
   
@@ -124,7 +125,7 @@ data_collection:
   
   # 'Other' category settings (non-crop areas: buildings, roads, lakes, trees, etc.)
   collect_other: true  # Set to false to skip 'Other' category collection
-  num_other_fields: 30  # Number of non-crop fields to sample (same as crops by default)
+  num_other_fields: 300  # Number of non-crop fields to sample (10x)
   non_crop_buffer_meters: 150  # Minimum distance (meters) from crop areas for non-crop sampling
                                  # Prevents sampling near crop field edges to avoid confusion
   export_timeout_minutes: 180  # Wait longer for large EE exports (minutes)

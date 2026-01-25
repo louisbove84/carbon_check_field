@@ -1,12 +1,13 @@
-# Skew Audit Container
-# ====================
+# Vertex AI Skew Audit Container - BASE IMAGE ONLY
+# =================================================
 # Container for monthly data skew detection and drift monitoring.
+# Code is downloaded at runtime from GCS, so no rebuild needed for code changes!
 
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies for matplotlib
+# Install system dependencies for matplotlib (critical for TensorBoard image rendering)
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
@@ -16,21 +17,19 @@ RUN apt-get update && apt-get install -y \
     zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy and install Python dependencies
+# Copy and install Python dependencies ONLY
 COPY skew_job/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy shared modules directory (from parent ml_pipeline/)
 COPY shared /app/shared
 
-# Copy skew job application files
-COPY skew_job/main.py .
-COPY skew_job/skew_detector.py .
-
-# Environment variables
-ENV PORT=8080
+# Vertex AI will set AIP_TENSORBOARD_LOG_DIR environment variable
 ENV PYTHONUNBUFFERED=1
 
-# Run Flask app with gunicorn
-# Timeout set high for EE data collection
-CMD exec gunicorn --bind :$PORT --workers 1 --threads 4 --timeout 3600 main:app
+# Copy entrypoint script that downloads code at runtime
+COPY skew_job/entrypoint.sh .
+RUN chmod +x entrypoint.sh
+
+# Entrypoint downloads code from GCS staging bucket, then runs skew audit
+ENTRYPOINT ["/app/entrypoint.sh"]

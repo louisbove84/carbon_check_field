@@ -498,6 +498,168 @@ def trigger_training_job():
         }
 
 
+def upload_skew_code(vertex_bucket, timestamp):
+    """
+    Upload skew audit code to GCS for dynamic code mounting.
+    This allows code changes without Docker rebuilds!
+    """
+    import os
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(vertex_bucket)
+    
+    # Get the directory where this script is located
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    # In Cloud Run image, skew_job lives under /app/skew_job
+    if os.path.exists(os.path.join(script_dir, 'skew_job')):
+        ml_pipeline_dir = script_dir
+    else:
+        ml_pipeline_dir = os.path.dirname(script_dir)  # Local: go up one level from orchestrator/
+    
+    code_files = [
+        'skew_job/vertex_ai_skew.py',
+        'skew_job/skew_detector.py'
+    ]
+    
+    code_uri = f"gs://{vertex_bucket}/skew_code/{timestamp}"
+    logger.info(f"   📤 Uploading skew audit code to {code_uri}")
+    
+    uploaded_count = 0
+    for file_path in code_files:
+        full_path = os.path.join(ml_pipeline_dir, file_path)
+        if not os.path.exists(full_path):
+            logger.warning(f"   ⚠️  {file_path} not found, skipping")
+            continue
+        
+        blob_path = f"skew_code/{timestamp}/{os.path.basename(file_path)}"
+        blob = bucket.blob(blob_path)
+        blob.upload_from_filename(full_path)
+        logger.info(f"   ✅ {os.path.basename(file_path)}")
+        uploaded_count += 1
+    
+    if uploaded_count > 0:
+        logger.info(f"   ✅ Uploaded {uploaded_count} code files")
+    else:
+        logger.warning("   ⚠️  No code files uploaded")
+    
+    return code_uri
+
+
+def trigger_skew_job():
+    """
+    Trigger Vertex AI Custom Job for skew/drift detection.
+    
+    This runs the skew audit as a Vertex AI Custom Job with native TensorBoard
+    integration, which enables proper image visibility in TensorBoard UI.
+    
+    Returns:
+        dict with skew audit results
+    """
+    try:
+        project_id = config['project']['id']
+        region = config['project']['region']
+        
+        # Machine type for skew audit (lighter than training)
+        machine_type = config.get('skew_audit', {}).get('machine_type', 'n1-standard-4')
+        
+        logger.info(f"   Triggering skew audit job...")
+        logger.info(f"   Machine type: {machine_type}")
+        
+        # Use regional bucket for Vertex AI (required)
+        vertex_bucket = f'{project_id}-training'
+        
+        # Upload skew code dynamically (allows code changes without Docker rebuild)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        code_uri = upload_skew_code(vertex_bucket, timestamp)
+        
+        # Initialize Vertex AI
+        aiplatform.init(
+            project=project_id,
+            location=region,
+            staging_bucket=f'gs://{vertex_bucket}'
+        )
+        
+        # Define custom job for skew audit
+        job = aiplatform.CustomContainerTrainingJob(
+            display_name=f'skew-audit-{datetime.now().strftime("%Y%m%d_%H%M")}',
+            container_uri=f'{region}-docker.pkg.dev/{project_id}/ml-containers/skew-audit:latest',
+            staging_bucket=f'gs://{vertex_bucket}/staging'
+        )
+        
+        # Get TensorBoard instance resource name from config
+        # CRITICAL: Use numeric project ID (not string project ID) for TensorBoard resource name
+        project_number = '303566498201'  # Numeric project ID
+        tensorboard_id = config.get('tensorboard', {}).get('instance_id')
+        
+        if not tensorboard_id:
+            logger.warning("   ⚠️  No TensorBoard instance ID in config, skew audit will run without TensorBoard")
+            tensorboard_name = None
+        else:
+            tensorboard_name = f'projects/{project_number}/locations/{region}/tensorboards/{tensorboard_id}'
+        
+        # Service account for skew job
+        service_account = f'ml-pipeline-sa@{project_id}.iam.gserviceaccount.com'
+        
+        # Generate experiment name for TensorBoard
+        experiment_name = f'skew-audit-{datetime.now().strftime("%Y%m%d")}'
+        
+        # Environment variables for TensorBoard integration and code mounting
+        # NOTE: DO NOT set AIP_TENSORBOARD_LOG_DIR manually - let Vertex AI set it automatically
+        # when the tensorboard parameter is linked. This ensures proper automatic sync.
+        env_vars = {
+            'AIP_TENSORBOARD_EXPERIMENT_NAME': experiment_name,
+            'AIP_TRAINING_DATA_URI': code_uri  # Tell entrypoint.sh where to download code
+        }
+        
+        # Run skew job with TensorBoard
+        logger.info("   Starting skew audit job on Vertex AI...")
+        if tensorboard_name:
+            logger.info(f"   TensorBoard ID: {tensorboard_id}")
+            logger.info(f"   TensorBoard Resource: {tensorboard_name}")
+        logger.info(f"   Experiment Name: {experiment_name}")
+        logger.info(f"   Code URI: {code_uri}")
+        logger.info(f"   Service account: {service_account}")
+        
+        run_params = {
+            'replica_count': 1,
+            'machine_type': machine_type,
+            'accelerator_count': 0,
+            'base_output_dir': f'gs://{vertex_bucket}/skew_output',
+            'service_account': service_account,
+            'environment_variables': env_vars
+        }
+        
+        # Only add tensorboard parameter if TensorBoard instance exists
+        if tensorboard_name:
+            run_params['tensorboard'] = tensorboard_name
+        
+        # Run the job (blocking - waits for completion)
+        model = job.run(**run_params)
+        
+        logger.info("   ✅ Skew audit job complete")
+        
+        # TensorBoard logs will be synced automatically by Vertex AI
+        if tensorboard_name:
+            logger.info("   📁 TensorBoard logs: Vertex AI will sync automatically")
+            logger.info("   ✅ Check TensorBoard UI for experiment data")
+        
+        return {
+            'status': 'success',
+            'job_name': job.display_name,
+            'tensorboard': {
+                'instance_id': tensorboard_id,
+                'resource': tensorboard_name,
+                'experiment_name': experiment_name
+            }
+        }
+    
+    except Exception as e:
+        logger.error(f"❌ Skew audit job failed: {e}", exc_info=True)
+        return {
+            'status': 'error',
+            'error': str(e)
+        }
+
+
 def get_training_metrics(job, vertex_bucket):
     """
     Extract training metrics from the completed Vertex AI job.
