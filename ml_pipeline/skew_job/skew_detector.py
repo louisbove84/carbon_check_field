@@ -189,6 +189,9 @@ def collect_recent_ee_samples(config: Dict[str, Any], sample_fraction: float = 0
     Collect recent UNLABELED samples from Earth Engine.
     Samples from the same regions used in training but without crop labels.
     
+    Uses the MOST RECENT complete growing season for NDVI data to enable
+    proper drift detection (comparing current data vs training data).
+    
     Args:
         config: Pipeline configuration
         sample_fraction: Fraction of training data to collect (default 10%)
@@ -208,11 +211,23 @@ def collect_recent_ee_samples(config: Dict[str, Any], sample_fraction: float = 0
     total_training_samples = (num_fields_per_crop * len(crops) + num_other_fields) * 3
     target_samples = int(total_training_samples * sample_fraction)
     
-    cdl_year = config.get('data_collection', {}).get('cdl_year', 2024)
+    # Use CURRENT year for skew detection (not training year)
+    # This enables proper drift detection: comparing recent data vs training data
+    # If before September 1, use previous year (growing season not complete)
+    today = datetime.now()
+    if today.month >= 9:
+        # Growing season complete for current year
+        skew_year = today.year
+    else:
+        # Use previous year's complete growing season
+        skew_year = today.year - 1
+    
+    training_year = config.get('data_collection', {}).get('cdl_year', 2024)
     
     logger.info(f"🌍 Collecting recent EE samples (label-free)")
     logger.info(f"   Target samples: {target_samples}")
-    logger.info(f"   CDL year (for NDVI date range): {cdl_year}")
+    logger.info(f"   Training data year: {training_year}")
+    logger.info(f"   Skew detection year: {skew_year} (most recent complete season)")
     
     all_samples = []
     
@@ -245,10 +260,10 @@ def collect_recent_ee_samples(config: Dict[str, Any], sample_fraction: float = 0
                 tileScale=16
             ).limit(samples_per_county)
             
-            # Extract NDVI features (no crop label)
+            # Extract NDVI features (no crop label) using CURRENT year
             def extract_features(feature):
                 return compute_ndvi_features_ee_as_feature(
-                    feature.geometry(), cdl_year
+                    feature.geometry(), skew_year
                 )
             
             county_samples = county_samples.map(extract_features)
