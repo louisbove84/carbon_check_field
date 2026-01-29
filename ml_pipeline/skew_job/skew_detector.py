@@ -211,18 +211,14 @@ def collect_recent_ee_samples(config: Dict[str, Any], sample_fraction: float = 0
     total_training_samples = (num_fields_per_crop * len(crops) + num_other_fields) * 3
     target_samples = int(total_training_samples * sample_fraction)
     
-    # Use CURRENT year for skew detection (not training year)
-    # This enables proper drift detection: comparing recent data vs training data
-    # If before September 1, use previous year (growing season not complete)
+    training_year = config.get('data_collection', {}).get('cdl_year', 2024)
+    # Use the most recent complete growing season for skew detection.
+    # If before September 1, use the previous year (current season incomplete).
     today = datetime.now()
     if today.month >= 9:
-        # Growing season complete for current year
         skew_year = today.year
     else:
-        # Use previous year's complete growing season
         skew_year = today.year - 1
-    
-    training_year = config.get('data_collection', {}).get('cdl_year', 2024)
     
     logger.info(f"🌍 Collecting recent EE samples (label-free)")
     logger.info(f"   Target samples: {target_samples}")
