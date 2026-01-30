@@ -17,7 +17,7 @@ Author: CarbonCheck Team
 from fastapi import FastAPI, HTTPException, Depends, Header, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional, Dict, Any
 import ee
 from google.cloud import aiplatform, storage
 from google.auth.transport import requests
@@ -43,8 +43,8 @@ _local_path = _base_dir
 _ml_pipeline_path = os.path.join(_base_dir, '..', 'ml_pipeline', 'trainer')
 _shared_path = os.path.join(_base_dir, '..', 'ml_pipeline', 'shared')
 
-_feature_paths = [_local_path, _ml_pipeline_path]
-_shared_paths = [_local_path, _shared_path]
+_feature_paths = [_shared_path]  # feature_engineering.py moved to shared/
+_shared_paths = [_shared_path]  # earth_engine_features.py moved to shared/
 
 def _first_existing(paths: list[str]) -> str | None:
     for path in paths:
@@ -90,27 +90,113 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Local model cache for probabilities/confidence
+# Local model cache for probabilities/confidence - Multi-model support
 MODEL_BUCKET = os.getenv("MODEL_BUCKET", "carboncheck-data")
 MODEL_PREFIX = os.getenv("MODEL_PREFIX", "models/crop_classifier_latest")
-LOCAL_MODEL = None
+LOCAL_MODELS = {}  # Dict mapping model_type to model data
 
-def load_local_model():
-    global LOCAL_MODEL
-    if LOCAL_MODEL is not None:
-        return LOCAL_MODEL
+def load_local_models():
+    """
+    Load all available models (RF and DNN) from GCS.
+    
+    Returns:
+        Dict mapping model_type to model data
+    """
+    global LOCAL_MODELS
+    if LOCAL_MODELS:
+        return LOCAL_MODELS
+    
     try:
         client = storage.Client()
         bucket = client.bucket(MODEL_BUCKET)
-        model_blob = bucket.blob(f"{MODEL_PREFIX}/model.joblib")
-        local_path = "/tmp/model.joblib"
-        model_blob.download_to_filename(local_path)
-        LOCAL_MODEL = joblib.load(local_path)
-        print(f" Loaded local model from gs://{MODEL_BUCKET}/{MODEL_PREFIX}")
-        return LOCAL_MODEL
+        local_dir = "/tmp/models"
+        os.makedirs(local_dir, exist_ok=True)
+        
+        # Download all model files
+        blobs = bucket.list_blobs(prefix=MODEL_PREFIX)
+        for blob in blobs:
+            rel_path = blob.name[len(MODEL_PREFIX):].lstrip('/')
+            if rel_path:
+                local_path = os.path.join(local_dir, rel_path)
+                os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                blob.download_to_filename(local_path)
+        
+        # Load Random Forest model
+        rf_path = os.path.join(local_dir, 'model_rf.pkl')
+        legacy_path = os.path.join(local_dir, 'model.joblib')
+        
+        if os.path.exists(rf_path):
+            rf_data = joblib.load(rf_path)
+            if isinstance(rf_data, dict):
+                LOCAL_MODELS['rf'] = {
+                    'pipeline': rf_data['pipeline'],
+                    'classes': rf_data.get('classes'),
+                    'feature_names': rf_data.get('feature_names')
+                }
+            else:
+                LOCAL_MODELS['rf'] = {
+                    'pipeline': rf_data,
+                    'classes': getattr(rf_data, 'classes_', None),
+                    'feature_names': None
+                }
+            print(f"Loaded RF model from gs://{MODEL_BUCKET}/{MODEL_PREFIX}")
+        elif os.path.exists(legacy_path):
+            pipeline = joblib.load(legacy_path)
+            LOCAL_MODELS['rf'] = {
+                'pipeline': pipeline,
+                'classes': getattr(pipeline, 'classes_', None),
+                'feature_names': None
+            }
+            print(f"Loaded RF model (legacy) from gs://{MODEL_BUCKET}/{MODEL_PREFIX}")
+        
+        # Load DNN model (try .keras format first, then legacy SavedModel format)
+        dnn_keras_path = os.path.join(local_dir, 'model_dnn.keras')
+        dnn_dir_legacy = os.path.join(local_dir, 'model_dnn')
+        dnn_meta_path = os.path.join(local_dir, 'model_dnn_meta.pkl')
+        
+        dnn_path = dnn_keras_path if os.path.exists(dnn_keras_path) else dnn_dir_legacy
+        
+        if os.path.exists(dnn_path) and os.path.exists(dnn_meta_path):
+            try:
+                import tensorflow as tf
+                dnn_model = tf.keras.models.load_model(dnn_path)
+                dnn_meta = joblib.load(dnn_meta_path)
+                
+                LOCAL_MODELS['dnn'] = {
+                    'model': dnn_model,
+                    'scaler': dnn_meta['scaler'],
+                    'label_encoder': dnn_meta['label_encoder'],
+                    'classes': dnn_meta.get('classes'),
+                    'feature_names': dnn_meta.get('feature_names')
+                }
+                print(f"Loaded DNN model from {dnn_path}")
+            except ImportError:
+                print("TensorFlow not available - skipping DNN model")
+            except Exception as e:
+                print(f"Could not load DNN model: {e}")
+        
+        if not LOCAL_MODELS:
+            print("No models loaded from GCS!")
+        else:
+            print(f"Loaded {len(LOCAL_MODELS)} models: {list(LOCAL_MODELS.keys())}")
+        
+        return LOCAL_MODELS
+        
     except Exception as e:
-        print(f"️  Failed to load local model: {e}")
-        return None
+        print(f"Failed to load models: {e}")
+        return {}
+
+
+def load_local_model():
+    """
+    Legacy function for backward compatibility.
+    Returns the RF model pipeline.
+    """
+    models = load_local_models()
+    rf_data = models.get('rf')
+    if rf_data:
+        return rf_data['pipeline']
+    return None
 
 # Request-scoped correlation id for logging across helpers
 request_id_ctx = contextvars.ContextVar("request_id", default="unknown")
@@ -246,9 +332,16 @@ class FieldSummary(BaseModel):
     total_cells: Optional[int] = None
 
 
+class ModelPrediction(BaseModel):
+    """Prediction from a single model"""
+    model_type: str  # 'rf' or 'dnn'
+    crop: str
+    confidence: Optional[float] = None
+
+
 class AnalyzeFieldResponse(BaseModel):
     """Analysis results with crop prediction and CO₂ income"""
-    # Legacy fields for backward compatibility (single prediction)
+    # Legacy fields for backward compatibility (single prediction - uses best model)
     crop: Optional[str] = None
     confidence: Optional[float] = None
     cdl_crop: Optional[str] = None  # CDL ground truth crop type
@@ -259,6 +352,10 @@ class AnalyzeFieldResponse(BaseModel):
     co2_income_avg: float
     features: Optional[List[float]] = None
     timestamp: str
+    
+    # Multi-model predictions (RF and DNN)
+    model_predictions: Optional[List[ModelPrediction]] = None
+    best_model: Optional[str] = None  # Which model was used for the primary prediction
     
     # New grid-based fields
     field_summary: Optional[FieldSummary] = None
@@ -518,10 +615,62 @@ def compute_ndvi_features(polygon_coords: List[Tuple[float, float]], year: int, 
 # VERTEX AI - CROP PREDICTION
 # ============================================================================
 
+def predict_crop_type_multi(features: List[float]) -> Dict[str, Dict[str, Any]]:
+    """
+    Get predictions from all available models.
+    
+    Args:
+        features: List of engineered features
+    
+    Returns:
+        Dict mapping model_type to {'crop': str, 'confidence': float}
+    """
+    results = {}
+    request_id = request_id_ctx.get()
+    models = load_local_models()
+    
+    # Random Forest prediction
+    if 'rf' in models:
+        try:
+            rf_data = models['rf']
+            pipeline = rf_data['pipeline']
+            probs = pipeline.predict_proba([features])[0]
+            classes = pipeline.classes_
+            pred_idx = int(np.argmax(probs))
+            crop = str(classes[pred_idx])
+            confidence = float(probs[pred_idx])
+            results['rf'] = {'crop': crop, 'confidence': confidence}
+            print(f"[{request_id}] RF prediction={crop} confidence={confidence:.2%}")
+        except Exception as e:
+            print(f"[{request_id}] RF prediction failed: {e}")
+    
+    # DNN prediction
+    if 'dnn' in models:
+        try:
+            dnn_data = models['dnn']
+            model = dnn_data['model']
+            scaler = dnn_data['scaler']
+            label_encoder = dnn_data['label_encoder']
+            
+            X_scaled = scaler.transform([features])
+            probs = model.predict(X_scaled, verbose=0)[0]
+            pred_idx = int(np.argmax(probs))
+            crop = str(label_encoder.inverse_transform([pred_idx])[0])
+            confidence = float(probs[pred_idx])
+            results['dnn'] = {'crop': crop, 'confidence': confidence}
+            print(f"[{request_id}] DNN prediction={crop} confidence={confidence:.2%}")
+        except Exception as e:
+            print(f"[{request_id}] DNN prediction failed: {e}")
+    
+    return results
+
+
 def predict_crop_type(features: List[float]) -> Tuple[str, float]:
     """
     Call Vertex AI endpoint to predict crop type from features.
     Uses predict_proba to get real confidence scores.
+    
+    For multi-model support, prefers local models and returns the best prediction.
     
     Args:
         features: List of 15 engineered features (removed 4 location features)
@@ -530,7 +679,16 @@ def predict_crop_type(features: List[float]) -> Tuple[str, float]:
         Tuple of (crop_name, confidence_score) where confidence is the max probability
     """
     try:
-        # Prefer local model for confidence if available
+        # Try multi-model prediction first
+        multi_preds = predict_crop_type_multi(features)
+        
+        if multi_preds:
+            # Choose best model based on confidence
+            best_model = max(multi_preds.keys(), key=lambda k: multi_preds[k].get('confidence', 0))
+            best_pred = multi_preds[best_model]
+            return best_pred['crop'], best_pred['confidence']
+        
+        # Fallback to legacy single model if multi-model failed
         local_model = load_local_model()
         if local_model is not None:
             request_id = request_id_ctx.get()
@@ -1001,7 +1159,7 @@ async def analyze_field(
 async def analyze_field_single(coords: List[Tuple[float, float]], area_acres: float, year: int) -> AnalyzeFieldResponse:
     """
     Single prediction for small fields (< 2 acres).
-    Uses existing logic for backward compatibility.
+    Returns predictions from all available models.
     """
     print(f"Single prediction mode for {area_acres:.1f} acre field...")
     
@@ -1012,9 +1170,21 @@ async def analyze_field_single(coords: List[Tuple[float, float]], area_acres: fl
     feature_log = dict(zip(FEATURE_NAMES, features))
     print(f"[{request_id}] Single features={feature_log}")
     
-    # Predict crop type via Vertex AI
-    crop, confidence = predict_crop_type(features)
-    print(f"[{request_id}] Single prediction crop={crop} confidence={confidence}")
+    # Get predictions from all models
+    multi_preds = predict_crop_type_multi(features)
+    
+    # Choose best model based on confidence
+    if multi_preds:
+        best_model = max(multi_preds.keys(), key=lambda k: multi_preds[k].get('confidence', 0))
+        best_pred = multi_preds[best_model]
+        crop = best_pred['crop']
+        confidence = best_pred['confidence']
+    else:
+        # Fallback to endpoint
+        crop, confidence = predict_crop_type(features)
+        best_model = 'endpoint'
+    
+    print(f"[{request_id}] Best prediction: {crop} ({confidence:.2%}) from {best_model}")
     
     # Validate prediction - reject non-crop areas (parking lots, buildings, etc.)
     validate_crop_prediction(crop)
@@ -1032,7 +1202,17 @@ async def analyze_field_single(coords: List[Tuple[float, float]], area_acres: fl
     # Calculate carbon income
     income = calculate_carbon_income(crop, area_acres)
     
-    # Build response (legacy format)
+    # Build model predictions list
+    model_predictions = [
+        ModelPrediction(
+            model_type=model_type,
+            crop=pred['crop'],
+            confidence=pred['confidence']
+        )
+        for model_type, pred in multi_preds.items()
+    ]
+    
+    # Build response with multi-model predictions
     response = AnalyzeFieldResponse(
         crop=crop,
         confidence=confidence,
@@ -1043,10 +1223,17 @@ async def analyze_field_single(coords: List[Tuple[float, float]], area_acres: fl
         co2_income_max=round(income["max"], 2),
         co2_income_avg=round(income["avg"], 2),
         features=features,
-        timestamp=datetime.utcnow().isoformat()
+        timestamp=datetime.utcnow().isoformat(),
+        model_predictions=model_predictions if model_predictions else None,
+        best_model=best_model
     )
     
-    print(f" Single prediction: {crop} ({confidence:.0%}), ${income['avg']:.0f}/year")
+    # Print summary
+    confidence_str = f"{confidence:.0%}" if confidence else "N/A"
+    print(f"Single prediction: {crop} ({confidence_str}), ${income['avg']:.0f}/year")
+    if len(multi_preds) > 1:
+        for model_type, pred in multi_preds.items():
+            print(f"   {model_type.upper()}: {pred['crop']} ({pred['confidence']:.2%})")
     
     return response
 

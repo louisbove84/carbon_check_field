@@ -30,11 +30,11 @@ cd /Users/beuxb/Desktop/Projects/carbon_check_field/ml_pipeline/orchestrator
 ./deploy.sh
 ```
 
-### 4. Optional: Schedule monthly runs (Cloud Scheduler)
+### 4. Optional: Schedule yearly runs (Cloud Scheduler)
 Once you have a Cloud Run URL, schedule a POST to it:
 ```bash
-gcloud scheduler jobs create http carboncheck-monthly-retrain \
-  --schedule="0 3 1 * *" \
+gcloud scheduler jobs create http carboncheck-yearly-retrain \
+  --schedule="0 3 1 1 *" \
   --uri="<CLOUD_RUN_SERVICE_URL>" \
   --http-method=POST \
   --time-zone="America/Chicago" \

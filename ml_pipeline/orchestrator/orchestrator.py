@@ -333,6 +333,10 @@ def upload_training_code(vertex_bucket, timestamp):
     """
     Upload training code to GCS for dynamic code mounting.
     This allows code changes without Docker rebuilds!
+    
+    Uploads:
+    - Top-level trainer Python files
+    - models/ subdirectory (for multi-model support)
     """
     import os
     storage_client = storage.Client()
@@ -346,33 +350,77 @@ def upload_training_code(vertex_bucket, timestamp):
     else:
         ml_pipeline_dir = os.path.dirname(script_dir)  # Local: go up one level from orchestrator/
     
+    # Top-level trainer files
     code_files = [
         'trainer/vertex_ai_training.py',
-        'trainer/feature_engineering.py',
         'trainer/tensorboard_logging.py',
         'trainer/visualization_utils.py'
     ]
     
+    # Shared module files (used by both trainer and backend)
+    shared_files = [
+        'shared/feature_engineering.py',
+        'shared/earth_engine_features.py'
+    ]
+    
+    # Models module files (for multi-model support)
+    models_files = [
+        'trainer/models/__init__.py',
+        'trainer/models/base_model.py',
+        'trainer/models/random_forest.py',
+        'trainer/models/dnn_model.py'
+    ]
+    
     code_uri = f"gs://{vertex_bucket}/code/{timestamp}"
-    logger.info(f"   📤 Uploading training code to {code_uri}")
+    logger.info(f"   Uploading training code to {code_uri}")
     
     uploaded_count = 0
+    
+    # Upload top-level files (flat structure)
     for file_path in code_files:
         full_path = os.path.join(ml_pipeline_dir, file_path)
         if not os.path.exists(full_path):
-            logger.warning(f"   ⚠️  {file_path} not found, skipping")
+            logger.warning(f"   {file_path} not found, skipping")
             continue
         
         blob_path = f"code/{timestamp}/{os.path.basename(file_path)}"
         blob = bucket.blob(blob_path)
         blob.upload_from_filename(full_path)
-        logger.info(f"   ✅ {os.path.basename(file_path)}")
+        logger.info(f"   {os.path.basename(file_path)}")
+        uploaded_count += 1
+    
+    # Upload models directory (preserving structure)
+    for file_path in models_files:
+        full_path = os.path.join(ml_pipeline_dir, file_path)
+        if not os.path.exists(full_path):
+            logger.warning(f"   {file_path} not found, skipping")
+            continue
+        
+        # Preserve the models/ subdirectory structure
+        rel_path = file_path.replace('trainer/', '')  # models/__init__.py
+        blob_path = f"code/{timestamp}/{rel_path}"
+        blob = bucket.blob(blob_path)
+        blob.upload_from_filename(full_path)
+        logger.info(f"   {rel_path}")
+        uploaded_count += 1
+    
+    # Upload shared module files (flat structure - will be in /app/)
+    for file_path in shared_files:
+        full_path = os.path.join(ml_pipeline_dir, file_path)
+        if not os.path.exists(full_path):
+            logger.warning(f"   {file_path} not found, skipping")
+            continue
+        
+        blob_path = f"code/{timestamp}/{os.path.basename(file_path)}"
+        blob = bucket.blob(blob_path)
+        blob.upload_from_filename(full_path)
+        logger.info(f"   {os.path.basename(file_path)} (from shared/)")
         uploaded_count += 1
     
     if uploaded_count > 0:
-        logger.info(f"   ✅ Uploaded {uploaded_count} code files")
+        logger.info(f"   Uploaded {uploaded_count} code files")
     else:
-        logger.warning("   ⚠️  No code files uploaded")
+        logger.warning("   No code files uploaded")
     
     return code_uri
 

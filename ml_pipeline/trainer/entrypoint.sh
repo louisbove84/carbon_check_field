@@ -19,21 +19,26 @@ if code_uri.startswith('gs://'):
     # Parse GCS path: gs://bucket/path/to/code
     parts = code_uri.replace('gs://', '').split('/', 1)
     bucket_name = parts[0]
-    prefix = parts[1] if len(parts) > 1 else ''
+    prefix = parts[1].rstrip('/') if len(parts) > 1 else ''
     
     client = storage.Client()
     bucket = client.bucket(bucket_name)
     
-    # Download all files with the prefix
+    # Download all files with the prefix (including subdirectories)
     blobs = list(bucket.list_blobs(prefix=prefix))
     print(f"   Found {len(blobs)} files to download")
     
     for blob in blobs:
         if blob.name.endswith('.py'):  # Only download Python files
-            filename = os.path.basename(blob.name)
-            dest_path = f'/app/{filename}'
+            # Get relative path from prefix
+            rel_path = blob.name[len(prefix):].lstrip('/')
+            dest_path = f'/app/{rel_path}'
+            
+            # Create parent directories if needed
+            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+            
             blob.download_to_filename(dest_path)
-            print(f"   ✅ {filename}")
+            print(f"   ✅ {rel_path}")
 PYEOF
     
     echo "✅ Code downloaded successfully"

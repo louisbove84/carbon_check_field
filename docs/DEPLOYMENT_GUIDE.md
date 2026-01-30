@@ -32,11 +32,13 @@
 │ Cloud Run Orchestrator (Lightweight)                       │
 │ - Export Earth Engine data to GCS                          │
 │ - Trigger Vertex AI Training Job                           │
-│   - Vertex AI Custom Training (inside trainer image)       │
-│     - Load data from BigQuery/GCS                          │
-│     - Train RandomForest model                             │
-│     - Save model to GCS                                    │
-│     - Return metrics                                       │
+│   ┌──────────────────────────────────────────────────────┐ │
+│   │ Vertex AI Custom Training (inside trainer image)     │ │
+│   │ - Load data from BigQuery/GCS                        │ │
+│   │ - Train RandomForest model                           │ │
+│   │ - Save model to GCS                                  │ │
+│   │ - Return metrics                                     │ │
+│   └──────────────────────────────────────────────────────┘ │
 │ - Monitor training                                         │
 │ - Evaluate & deploy if gates pass                          │
 └────────────────────────────────────────────────────────────┘
@@ -58,12 +60,12 @@ ml_pipeline/
 │   └── deploy.sh             # Deploy to Cloud Run
 │
 ├── trainer/                  # Vertex AI training container
-│   ├── vertex_ai_training.py             # Training script
-│   ├── Dockerfile           # ML-optimized image
-│   ├── requirements.txt     # ML libraries
-│   └── build_docker.sh             # Build & push to Artifact Registry
+│   ├── vertex_ai_training.py # Training script
+│   ├── Dockerfile            # ML-optimized image
+│   ├── requirements.txt      # ML libraries
+│   └── build_docker.sh       # Build & push to Artifact Registry
 │
-└── config.yaml              # Shared configuration
+└── config.yaml               # Shared configuration
 ```
 
 ---
@@ -133,10 +135,10 @@ curl -X POST <CLOUD_RUN_SERVICE_URL>
 ---
 
 ## Scheduling (Cloud Scheduler)
-Create a monthly Cloud Scheduler job that calls the orchestrator endpoint:
+Create a yearly Cloud Scheduler job that calls the orchestrator endpoint:
 ```bash
-gcloud scheduler jobs create http carboncheck-monthly-retrain \
-  --schedule="0 3 1 * *" \
+gcloud scheduler jobs create http carboncheck-yearly-retrain \
+  --schedule="0 3 1 1 *" \
   --uri="<CLOUD_RUN_SERVICE_URL>" \
   --http-method=POST \
   --time-zone="America/Chicago" \
@@ -202,10 +204,10 @@ gsutil cp config.yaml gs://carboncheck-data/config/config.yaml
 | **BigQuery**                      | -          | ~$0.05           |
 | **Total per run**                 | ~10-15 min | **~$0.66-$2.16** |
 
-**Monthly cost (1 run/month):** ~$0.66-$2.16
+**Yearly cost (1 run/year):** ~$0.66-$2.16
 
-**vs Old Cloud Functions:** ~$5-7/month  
-**Savings: 60-70%!** 
+**vs Old Cloud Functions:** ~$5-7/month (if run monthly)  
+**Savings: 60-70% per run** 
 
 ---
 
@@ -232,7 +234,7 @@ python vertex_ai_training.py
 1.  Build trainer container (`cd trainer && ./build_docker.sh`)
 2.  Deploy orchestrator (`cd orchestrator && ./deploy.sh`)
 3.  Run pipeline (`curl -X POST <service-url>`)
-4.  Set up Cloud Scheduler for monthly runs
+4.  Set up Cloud Scheduler for yearly runs
 5.  Monitor BigQuery for metrics
 
 **That's it!** Your ML pipeline is now fully automated. 

@@ -1,16 +1,22 @@
 """
-Data Skew Detector (Label-Free)
-===============================
+Data Skew Detector (Label-Free) - Multi-Model Support
+=====================================================
 Detects distribution shifts between training data and recent Earth Engine samples
 WITHOUT requiring labeled data.
+
+Multi-Model Support:
+- Loads both Random Forest and DNN models from GCS
+- Computes predictions from both models
+- Logs separate entropy drift metrics for each model (skew/rf/, skew/dnn/)
+- Feature drift remains model-agnostic (same for both)
 
 Metrics computed (all label-free):
 1. Feature Distribution Skew:
    - KS (Kolmogorov-Smirnov) test - detects any distributional shift
    - PSI (Population Stability Index) - industry standard with clear thresholds
    - JS (Jensen-Shannon) divergence - symmetric, bounded divergence measure
-2. Prediction Entropy - Model uncertainty on new data
-3. Prediction Distribution Drift - How model output distribution changes
+2. Prediction Entropy - Model uncertainty on new data (per-model)
+3. Prediction Distribution Drift - How model output distribution changes (per-model)
 
 PSI Interpretation:
 - < 0.1: No significant shift
@@ -25,11 +31,12 @@ JS Divergence Interpretation:
 This job:
 1. Pulls random samples from Earth Engine (same regions as training)
 2. Loads existing training data from BigQuery
-3. Extracts features and gets endpoint predictions
-4. Compares feature distributions using KS, PSI, and JS (no labels needed)
-5. Monitors prediction entropy
-6. Logs visualizations to TensorBoard
-7. Stores results in BigQuery
+3. Loads both RF and DNN models from GCS
+4. Extracts features and gets predictions from both models
+5. Compares feature distributions using KS, PSI, and JS (no labels needed)
+6. Monitors prediction entropy per model
+7. Logs visualizations to TensorBoard with model prefixes
+8. Stores results in BigQuery
 """
 
 import os
@@ -56,7 +63,203 @@ for path in shared_paths:
     if os.path.exists(path) and path not in sys.path:
         sys.path.insert(0, path)
 
+# Add trainer module for model classes
+trainer_paths = [
+    os.path.join(os.path.dirname(__file__), '..', 'trainer'),
+    '/app/trainer',
+]
+for path in trainer_paths:
+    if os.path.exists(path) and path not in sys.path:
+        sys.path.insert(0, path)
+
 logger = logging.getLogger(__name__)
+
+
+def load_models_from_gcs(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Load trained models (RF and DNN) from GCS.
+    
+    Returns:
+        Dict mapping model_type to loaded model instance
+    """
+    from google.cloud import storage
+    import tempfile
+    import joblib
+    
+    bucket_name = config['storage']['bucket']
+    model_path = config['model']['artifact_path']
+    
+    logger.info(f"Loading models from GCS: gs://{bucket_name}/{model_path}/")
+    
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    
+    models = {}
+    local_model_dir = tempfile.mkdtemp()
+    
+    # Download all model files
+    blobs = bucket.list_blobs(prefix=model_path)
+    for blob in blobs:
+        rel_path = blob.name[len(model_path):].lstrip('/')
+        local_path = os.path.join(local_model_dir, rel_path)
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        blob.download_to_filename(local_path)
+    
+    # Load feature columns
+    feature_cols_path = os.path.join(local_model_dir, 'feature_cols.json')
+    if os.path.exists(feature_cols_path):
+        with open(feature_cols_path, 'r') as f:
+            feature_cols = json.load(f)
+    else:
+        feature_cols = None
+        logger.warning("   No feature_cols.json found")
+    
+    # Load Random Forest model
+    rf_path = os.path.join(local_model_dir, 'model_rf.pkl')
+    if os.path.exists(rf_path):
+        try:
+            rf_data = joblib.load(rf_path)
+            # Handle both new format (dict with pipeline) and old format (Pipeline directly)
+            if isinstance(rf_data, dict):
+                models['rf'] = {
+                    'pipeline': rf_data['pipeline'],
+                    'feature_names': rf_data.get('feature_names', feature_cols),
+                    'classes': rf_data.get('classes')
+                }
+            else:
+                models['rf'] = {
+                    'pipeline': rf_data,
+                    'feature_names': feature_cols,
+                    'classes': None
+                }
+            logger.info("   Loaded Random Forest model")
+        except Exception as e:
+            logger.warning(f"   Could not load RF model: {e}")
+    else:
+        # Try legacy model.joblib path
+        legacy_path = os.path.join(local_model_dir, 'model.joblib')
+        if os.path.exists(legacy_path):
+            try:
+                models['rf'] = {
+                    'pipeline': joblib.load(legacy_path),
+                    'feature_names': feature_cols,
+                    'classes': None
+                }
+                logger.info("   Loaded Random Forest model (legacy format)")
+            except Exception as e:
+                logger.warning(f"   Could not load legacy RF model: {e}")
+    
+    # Load DNN model (try .keras format first, then legacy SavedModel format)
+    dnn_keras_path = os.path.join(local_model_dir, 'model_dnn.keras')
+    dnn_dir_legacy = os.path.join(local_model_dir, 'model_dnn')
+    dnn_meta_path = os.path.join(local_model_dir, 'model_dnn_meta.pkl')
+    
+    dnn_path = dnn_keras_path if os.path.exists(dnn_keras_path) else dnn_dir_legacy
+    
+    if os.path.exists(dnn_path) and os.path.exists(dnn_meta_path):
+        try:
+            import tensorflow as tf
+            dnn_model = tf.keras.models.load_model(dnn_path)
+            dnn_meta = joblib.load(dnn_meta_path)
+            
+            models['dnn'] = {
+                'model': dnn_model,
+                'scaler': dnn_meta['scaler'],
+                'label_encoder': dnn_meta['label_encoder'],
+                'feature_names': dnn_meta.get('feature_names', feature_cols),
+                'classes': dnn_meta.get('classes')
+            }
+            logger.info(f"   Loaded DNN model from {dnn_path}")
+        except ImportError:
+            logger.warning("   TensorFlow not available - skipping DNN model")
+        except Exception as e:
+            logger.warning(f"   Could not load DNN model: {e}")
+    
+    if not models:
+        logger.warning("   No models loaded from GCS!")
+    else:
+        logger.info(f"   Loaded {len(models)} models: {list(models.keys())}")
+    
+    return models, feature_cols
+
+
+def predict_with_models(
+    models: Dict[str, Any],
+    df: pd.DataFrame,
+    feature_cols: List[str]
+) -> Dict[str, Dict[str, Any]]:
+    """
+    Get predictions from all loaded models.
+    
+    Args:
+        models: Dict of loaded models from load_models_from_gcs
+        df: DataFrame with features
+        feature_cols: List of feature column names
+        
+    Returns:
+        Dict mapping model_type to prediction results
+    """
+    results = {}
+    
+    # Engineer additional features (same as endpoint)
+    df = df.copy()
+    df['ndvi_range'] = df['ndvi_max'] - df['ndvi_min']
+    df['ndvi_iqr'] = df['ndvi_p75'] - df['ndvi_p25']
+    df['ndvi_change'] = df['ndvi_late'] - df['ndvi_early']
+    df['ndvi_early_ratio'] = df['ndvi_early'] / (df['ndvi_mean'] + 1e-6)
+    df['ndvi_late_ratio'] = df['ndvi_late'] / (df['ndvi_mean'] + 1e-6)
+    
+    engineered_cols = ['ndvi_range', 'ndvi_iqr', 'ndvi_change', 'ndvi_early_ratio', 'ndvi_late_ratio']
+    
+    # Determine which columns to use
+    if feature_cols:
+        all_feature_cols = [c for c in feature_cols if c in df.columns]
+    else:
+        base_cols = ['ndvi_mean', 'ndvi_std', 'ndvi_min', 'ndvi_max',
+                     'ndvi_p25', 'ndvi_p50', 'ndvi_p75', 'ndvi_early', 'ndvi_late']
+        all_feature_cols = [c for c in base_cols + engineered_cols if c in df.columns]
+    
+    X = df[all_feature_cols].fillna(0).values
+    
+    for model_type, model_data in models.items():
+        try:
+            if model_type == 'rf':
+                pipeline = model_data['pipeline']
+                predictions = pipeline.predict(X)
+                probabilities = pipeline.predict_proba(X)
+                
+            elif model_type == 'dnn':
+                model = model_data['model']
+                scaler = model_data['scaler']
+                label_encoder = model_data['label_encoder']
+                
+                X_scaled = scaler.transform(X)
+                probabilities = model.predict(X_scaled, verbose=0)
+                pred_indices = np.argmax(probabilities, axis=1)
+                predictions = label_encoder.inverse_transform(pred_indices)
+            else:
+                logger.warning(f"   Unknown model type: {model_type}")
+                continue
+            
+            # Calculate prediction metrics
+            pred_counts = pd.Series(predictions).value_counts(normalize=True)
+            entropy = float(stats.entropy(pred_counts.values)) if len(pred_counts) > 1 else 0.0
+            
+            results[model_type] = {
+                'predictions': predictions,
+                'probabilities': probabilities,
+                'prediction_entropy': entropy,
+                'num_unique_predictions': int(len(pred_counts)),
+                'most_common_prediction': str(pred_counts.index[0]) if len(pred_counts) > 0 else 'Unknown',
+                'most_common_pct': float(pred_counts.values[0]) if len(pred_counts) > 0 else 0.0
+            }
+            
+            logger.info(f"   {model_type.upper()}: entropy={entropy:.4f}, unique_preds={len(pred_counts)}")
+            
+        except Exception as e:
+            logger.warning(f"   Could not get predictions from {model_type}: {e}")
+    
+    return results
 
 
 def compute_psi(expected: np.ndarray, actual: np.ndarray, bins: int = 10) -> float:
@@ -1309,6 +1512,13 @@ def log_skew_to_tensorboard(
             writer.add_scalar('skew/recent_entropy', pred_metrics.get('recent_entropy', 0), 0)
             writer.add_scalar('skew/entropy_drift', pred_metrics.get('entropy_drift', 0), 0)
         
+        # Log per-model entropy drift (for multi-model support)
+        per_model_entropy_drift = metrics.get('per_model_entropy_drift', {})
+        for model_type, drift_info in per_model_entropy_drift.items():
+            writer.add_scalar(f'skew/{model_type}/training_entropy', drift_info.get('training_entropy', 0), 0)
+            writer.add_scalar(f'skew/{model_type}/recent_entropy', drift_info.get('recent_entropy', 0), 0)
+            writer.add_scalar(f'skew/{model_type}/entropy_drift', drift_info.get('entropy_drift', 0), 0)
+        
         for feature, stats_dict in feature_skew.items():
             writer.add_scalar(f'feature_ks/{feature}', stats_dict['ks_statistic'], 0)
             writer.add_scalar(f'feature_psi/{feature}', stats_dict['psi'], 0)
@@ -1609,15 +1819,15 @@ def store_results_in_bigquery(metrics: Dict[str, Any], config: Dict[str, Any]):
 
 def run_skew_audit() -> Dict[str, Any]:
     """
-    Run the complete label-free skew audit pipeline.
+    Run the complete label-free skew audit pipeline with multi-model support.
     
     Returns:
-        Dict with audit results
+        Dict with audit results including per-model metrics
     """
     start_time = datetime.now()
     
     logger.info("=" * 70)
-    logger.info("🔍 DATA SKEW AUDIT (Label-Free)")
+    logger.info("DATA SKEW AUDIT (Label-Free, Multi-Model)")
     logger.info("=" * 70)
     
     try:
@@ -1633,7 +1843,7 @@ def run_skew_audit() -> Dict[str, Any]:
             tensorboard_resource = f'projects/{project_number}/locations/{region}/tensorboards/{tensorboard_id}'
         else:
             tensorboard_resource = None
-            logger.warning("   ⚠️  No SKEW_TENSORBOARD_ID set")
+            logger.warning("   No SKEW_TENSORBOARD_ID set")
         
         # Step 1: Collect recent EE samples (no labels)
         logger.info("STEP 1: Collect recent Earth Engine samples (label-free)")
@@ -1647,31 +1857,71 @@ def run_skew_audit() -> Dict[str, Any]:
         training_df = load_training_data(config)
         logger.info("")
         
-        # Step 3: Get endpoint predictions with confidence
-        logger.info("STEP 3: Get endpoint predictions")
+        # Step 3: Load models from GCS
+        logger.info("STEP 3: Load models from GCS")
         logger.info("-" * 70)
-        training_pred_metrics = {}
-        recent_pred_metrics = {}
-        try:
-            training_df, training_pred_metrics = get_endpoint_predictions_with_confidence(config, training_df)
-            if len(recent_df) > 0:
-                recent_df, recent_pred_metrics = get_endpoint_predictions_with_confidence(config, recent_df)
-        except Exception as e:
-            logger.warning(f"   ⚠️  Could not get predictions: {e}")
+        models, feature_cols = load_models_from_gcs(config)
         logger.info("")
         
-        # Step 4: Compute label-free skew metrics
-        logger.info("STEP 4: Compute label-free skew metrics")
+        # Step 4: Get predictions from all models
+        logger.info("STEP 4: Get predictions from all models")
+        logger.info("-" * 70)
+        training_model_preds = {}
+        recent_model_preds = {}
+        
+        if models:
+            try:
+                training_model_preds = predict_with_models(models, training_df, feature_cols)
+                if len(recent_df) > 0:
+                    recent_model_preds = predict_with_models(models, recent_df, feature_cols)
+            except Exception as e:
+                logger.warning(f"   Could not get model predictions: {e}")
+        
+        # For backward compatibility, use RF as primary if available
+        training_pred_metrics = training_model_preds.get('rf', {})
+        recent_pred_metrics = recent_model_preds.get('rf', {})
+        
+        # Fallback to endpoint if no models loaded
+        if not models:
+            logger.info("   Falling back to endpoint predictions...")
+            try:
+                training_df, training_pred_metrics = get_endpoint_predictions_with_confidence(config, training_df)
+                if len(recent_df) > 0:
+                    recent_df, recent_pred_metrics = get_endpoint_predictions_with_confidence(config, recent_df)
+            except Exception as e:
+                logger.warning(f"   Could not get endpoint predictions: {e}")
+        logger.info("")
+        
+        # Step 5: Compute label-free skew metrics
+        logger.info("STEP 5: Compute label-free skew metrics")
         logger.info("-" * 70)
         metrics = compute_label_free_skew_metrics(
             training_df, recent_df, 
             training_pred_metrics, recent_pred_metrics,
             config
         )
+        
+        # Add per-model prediction metrics
+        metrics['model_predictions'] = {
+            'training': training_model_preds,
+            'recent': recent_model_preds
+        }
+        
+        # Compute per-model entropy drift
+        per_model_entropy_drift = {}
+        for model_type in training_model_preds.keys():
+            train_entropy = training_model_preds.get(model_type, {}).get('prediction_entropy', 0)
+            recent_entropy = recent_model_preds.get(model_type, {}).get('prediction_entropy', 0)
+            per_model_entropy_drift[model_type] = {
+                'training_entropy': train_entropy,
+                'recent_entropy': recent_entropy,
+                'entropy_drift': recent_entropy - train_entropy
+            }
+        metrics['per_model_entropy_drift'] = per_model_entropy_drift
         logger.info("")
         
-        # Step 5: Log to TensorBoard
-        logger.info("STEP 5: Log to TensorBoard")
+        # Step 6: Log to TensorBoard
+        logger.info("STEP 6: Log to TensorBoard")
         logger.info("-" * 70)
         if tensorboard_resource:
             tb_path = log_skew_to_tensorboard(
@@ -1682,8 +1932,8 @@ def run_skew_audit() -> Dict[str, Any]:
             logger.warning("   Skipping TensorBoard logging (no instance configured)")
         logger.info("")
         
-        # Step 6: Store in BigQuery
-        logger.info("STEP 6: Store results in BigQuery")
+        # Step 7: Store in BigQuery
+        logger.info("STEP 7: Store results in BigQuery")
         logger.info("-" * 70)
         store_results_in_bigquery(metrics, config)
         logger.info("")
@@ -1694,17 +1944,26 @@ def run_skew_audit() -> Dict[str, Any]:
         drift_score_info = metrics.get('drift_score_info', {})
         
         logger.info("=" * 70)
-        logger.info("✅ SKEW AUDIT COMPLETE (Label-Free)")
+        logger.info("SKEW AUDIT COMPLETE (Multi-Model)")
         logger.info("=" * 70)
         logger.info("")
-        logger.info("╔══════════════════════════════════════════╗")
-        logger.info(f"║  DRIFT SCORE: {drift_score_info.get('drift_score', 0):>5.1f}/100                   ║")
-        logger.info(f"║  RETRAINING: {drift_score_info.get('retraining_needed', 'N/A'):<20}        ║")
-        logger.info("╚══════════════════════════════════════════╝")
+        logger.info("+" + "=" * 44 + "+")
+        logger.info(f"|  DRIFT SCORE: {drift_score_info.get('drift_score', 0):>5.1f}/100                     |")
+        logger.info(f"|  RETRAINING: {drift_score_info.get('retraining_needed', 'N/A'):<20}          |")
+        logger.info("+" + "=" * 44 + "+")
+        logger.info("")
+        
+        # Per-model entropy drift summary
+        if per_model_entropy_drift:
+            logger.info("Per-Model Entropy Drift:")
+            for model_type, drift_info in per_model_entropy_drift.items():
+                logger.info(f"   {model_type.upper()}: {drift_info['training_entropy']:.4f} -> {drift_info['recent_entropy']:.4f} (drift: {drift_info['entropy_drift']:+.4f})")
+        
         logger.info("")
         logger.info(f"Duration: {duration:.1f} minutes")
         logger.info(f"Training samples: {metrics['training_samples']}")
         logger.info(f"Recent samples: {metrics['recent_samples']}")
+        logger.info(f"Models loaded: {list(models.keys()) if models else 'None (endpoint fallback)'}")
         logger.info(f"Avg KS: {summary.get('avg_feature_ks', 0):.4f} | Avg PSI: {summary.get('avg_feature_psi', 0):.4f} | Avg JS: {summary.get('avg_feature_js', 0):.4f}")
         logger.info(f"Max KS: {summary.get('max_feature_ks', 0):.4f} | Max PSI: {summary.get('max_feature_psi', 0):.4f} | Max JS: {summary.get('max_feature_js', 0):.4f}")
         logger.info(f"Score Breakdown: Skew/Kurt={drift_score_info.get('skew_kurtosis_score', 0):.1f} | Dist={drift_score_info.get('distribution_drift_score', 0):.1f} | Tail={drift_score_info.get('tail_other_score', 0):.1f}")
@@ -1717,12 +1976,14 @@ def run_skew_audit() -> Dict[str, Any]:
             'duration_minutes': round(duration, 2),
             'drift_score': drift_score_info.get('drift_score', 0),
             'retraining_needed': drift_score_info.get('retraining_needed', 'UNKNOWN'),
+            'models_used': list(models.keys()) if models else ['endpoint'],
+            'per_model_entropy_drift': per_model_entropy_drift,
             'metrics': metrics
         }
         
     except Exception as e:
         duration = (datetime.now() - start_time).total_seconds() / 60
-        logger.error(f"❌ Skew audit failed: {e}", exc_info=True)
+        logger.error(f"Skew audit failed: {e}", exc_info=True)
         return {
             'status': 'error',
             'error': str(e),

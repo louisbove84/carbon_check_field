@@ -13,6 +13,10 @@ pandas>=2.1.0
 numpy>=1.26.0
 scikit-learn>=1.3.0
 scipy>=1.11.0
+joblib>=1.3.0
+
+# Deep Learning (optional - for DNN model loading)
+tensorflow>=2.14.0
 
 # Visualization (for TensorBoard figures)
 matplotlib>=3.8.0
