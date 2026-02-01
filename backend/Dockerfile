@@ -18,6 +18,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code and shared modules
+# Note: shared modules are copied to backend/ before build by deploy.sh
 COPY app.py .
 COPY feature_engineering.py .
 COPY earth_engine_features.py .

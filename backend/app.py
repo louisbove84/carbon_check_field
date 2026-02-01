@@ -43,8 +43,9 @@ _local_path = _base_dir
 _ml_pipeline_path = os.path.join(_base_dir, '..', 'ml_pipeline', 'trainer')
 _shared_path = os.path.join(_base_dir, '..', 'ml_pipeline', 'shared')
 
-_feature_paths = [_shared_path]  # feature_engineering.py moved to shared/
-_shared_paths = [_shared_path]  # earth_engine_features.py moved to shared/
+# Look for modules in shared/ first (local dev), then local dir (Docker container)
+_feature_paths = [_shared_path, _local_path]
+_shared_paths = [_shared_path, _local_path]
 
 def _first_existing(paths: list[str]) -> str | None:
     for path in paths:

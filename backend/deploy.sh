@@ -42,12 +42,22 @@ gcloud services enable \
     aiplatform.googleapis.com \
     --quiet
 
+# Copy shared modules to backend for Docker build
+echo "📦 Copying shared modules..."
+cp ../ml_pipeline/shared/feature_engineering.py .
+cp ../ml_pipeline/shared/earth_engine_features.py .
+echo "   ✅ Copied feature_engineering.py and earth_engine_features.py"
+
 # Build Docker image
 echo "🏗️  Building Docker image..."
 gcloud builds submit \
     --tag ${IMAGE_NAME} \
     --timeout=15m \
     .
+
+# Clean up copied files (they live in ml_pipeline/shared/)
+rm -f feature_engineering.py earth_engine_features.py
+echo "   🧹 Cleaned up temporary copies"
 
 # Deploy to Cloud Run
 echo "🚢 Deploying to Cloud Run..."
