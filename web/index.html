@@ -54,9 +54,9 @@
       loadMapsWithKey();
     } else {
       const cfg = document.createElement('script');
-      cfg.src = '/api/carboncheck-config.js';
+      cfg.src = '/api/carboncheck-config';
       cfg.onload = loadMapsWithKey;
-      cfg.onerror = () => console.error('Failed to load /api/carboncheck-config.js');
+      cfg.onerror = () => console.error('Failed to load /api/carboncheck-config');
       document.head.appendChild(cfg);
     }
   </script>

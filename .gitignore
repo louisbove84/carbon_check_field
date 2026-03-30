@@ -33,7 +33,8 @@ migrate_working_dir/
 .packages
 .pub-cache/
 .pub/
-/build/
+# Parent /build/ cannot be negated for children; use * so !/build/web/ works
+/build/*
 !/build/web/
 !/build/web/**
 
@@ -100,7 +101,9 @@ backend/*.pdf
 
 # iOS build artifacts
 ios/build/
-build/
+# Root Flutter web output can be tracked for Vercel; do not use a blanket `build/`
+# here — it overrides !/build/web/ above. Ignore Android Gradle build instead:
+/android/build/
 *.xcarchive
 *.ipa
 DerivedData/
