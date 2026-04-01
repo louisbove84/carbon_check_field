@@ -1,5 +1,5 @@
 # Web deploy only: root pyproject + api/ triggers FastAPI detection on Vercel 50+.
-# Flutter output lives in public/ (CI); Dart sources are not needed at the edge.
+# Flutter output is build/web (CI). Dart sources are not needed at the edge.
 pyproject.toml
 requirements-all.txt
 pubspec.yaml
@@ -22,5 +22,10 @@ linux
 macos
 windows
 docs
-# Only root Flutter assets (bundled into public/assets by CI); do not match public/assets
+# Only root Flutter assets (bundled into build/web/assets by CI); do not match build/web/assets
 /assets/
+
+# Vercel CLI skips .gitignore paths — force-include Flutter output from GitHub Actions
+!build
+!build/web
+!build/web/**

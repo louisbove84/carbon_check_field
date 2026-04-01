@@ -33,11 +33,6 @@ jobs:
           flutter build web --release --no-wasm-dry-run
           test -d build/web
           test -f build/web/index.html
-          # Vercel: serve static from public/ + serverless from api/ (legacy builds broke /api)
-          rm -rf public
-          mkdir -p public
-          cp -R build/web/. public/
-          test -f public/index.html
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
