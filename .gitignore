@@ -38,6 +38,9 @@ migrate_working_dir/
 !/build/web/
 !/build/web/**
 
+# Vercel deploy bundle (copied from build/web in CI)
+/public/
+
 # Symbolication related
 app.*.symbols
 

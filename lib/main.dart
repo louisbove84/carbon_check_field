@@ -60,11 +60,7 @@ class CarbonCheckApp extends StatelessWidget {
       
       // Theme configuration
       theme: ThemeData(
-        // Primary color: Farmer-friendly green
-        primarySwatch: Colors.green,
-        primaryColor: const Color(0xFF2E7D32),
-        
-        // Accent color: Sky blue
+        // Material 3: avoid primarySwatch/primaryColor (deprecated; can assert on web)
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF2E7D32),
           secondary: const Color(0xFF1976D2),
