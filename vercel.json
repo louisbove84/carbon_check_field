@@ -4,5 +4,5 @@
   "installCommand": "echo 'Skip monorepo Python install on Vercel'",
   "buildCommand": "rm -rf public && mkdir -p public && cp -R build/web/. public/ && test -f public/index.html",
   "outputDirectory": "public",
-  "ignoreCommand": "[ -d build/web ] && [ -f build/web/index.html ] || [ -f public/index.html ] || exit 1"
+  "ignoreCommand": "bash -c 'if [ -d build/web ] && [ -f build/web/index.html ]; then exit 0; else exit 1; fi'"
 }
