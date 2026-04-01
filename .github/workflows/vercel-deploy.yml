@@ -27,6 +27,8 @@ jobs:
           set -euxo pipefail
           flutter --version
           flutter pub get
+          # pubspec lists .env as an asset; real .env is gitignored — bundle needs a file on CI
+          if [ ! -f .env ]; then cp .env.example .env; fi
           # CI: avoid wasm dry-run noise / possible non-zero exits on newer Flutter
           flutter build web --release --no-wasm-dry-run
           test -d build/web
