@@ -55,6 +55,11 @@ jobs:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
+      - name: Verify Flutter output for Vercel upload
+        run: |
+          test -f build/web/index.html
+          echo "build/web files: $(find build/web -type f | wc -l)"
+
       - name: Deploy to Vercel
         run: >
           vercel deploy --prod --yes

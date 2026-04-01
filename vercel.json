@@ -1,8 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
+  "git": {
+    "deploymentEnabled": false
+  },
   "installCommand": "echo 'Skip monorepo Python install on Vercel'",
   "buildCommand": "test -f build/web/index.html",
   "outputDirectory": "build/web",
-  "ignoreCommand": "bash -c 'if [ -d build/web ] && [ -f build/web/index.html ]; then exit 0; else exit 1; fi'"
+  "ignoreCommand": "test -f build/web/index.html"
 }
