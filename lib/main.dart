@@ -38,12 +38,14 @@ void main() async {
     // App can still run, but backend calls will fail
   }
   
-  // Set preferred orientations (portrait only for better UX)
-  SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-  ]);
-  
+  // Portrait lock is for mobile; on web this can throw / hit engine null paths.
+  if (!kIsWeb) {
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
+  }
+
   runApp(const CarbonCheckApp());
 }
 
