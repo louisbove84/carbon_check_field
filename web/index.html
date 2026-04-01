@@ -31,37 +31,60 @@
 
   <title>CarbonCheck Field</title>
   <link rel="manifest" href="manifest.json">
-  
-  <!-- Google Maps: local uses config.local.js (not deployed); production uses /api/carboncheck-config -->
+
+  <!--
+    Load order: config (sets GOOGLE_MAPS_API_KEY) → Maps JS → flutter_bootstrap.
+    If flutter_bootstrap ran in parallel (async), Dart could read the key before it existed.
+    Production: Vercel env CARBONCHECK_GOOGLE_MAPS_API_KEY; GCP key must allow this origin.
+  -->
   <script>
-    function loadMapsWithKey() {
-      var mapsKey = typeof GOOGLE_MAPS_API_KEY !== 'undefined' ? GOOGLE_MAPS_API_KEY : undefined;
+    function startFlutter() {
+      var boot = document.createElement('script');
+      boot.src = 'flutter_bootstrap.js';
+      boot.async = true;
+      document.body.appendChild(boot);
+    }
+
+    function loadMapsThenFlutter() {
+      var mapsKey = typeof GOOGLE_MAPS_API_KEY !== 'undefined' ? GOOGLE_MAPS_API_KEY : '';
+      mapsKey = typeof mapsKey === 'string' ? mapsKey.trim() : '';
       if (mapsKey) {
         var script = document.createElement('script');
-        script.src = 'https://maps.googleapis.com/maps/api/js?key=' + mapsKey;
+        script.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(mapsKey);
+        script.onload = startFlutter;
+        script.onerror = function () {
+          console.error('Failed to load Google Maps JavaScript API');
+          startFlutter();
+        };
         document.head.appendChild(script);
       } else {
-        console.error('GOOGLE_MAPS_API_KEY not found. For local dev, create web/config.local.js');
+        console.error(
+          'GOOGLE_MAPS_API_KEY missing. Local: web/config.local.js. ' +
+          'Vercel: set CARBONCHECK_GOOGLE_MAPS_API_KEY and allow this domain on the key.'
+        );
+        startFlutter();
       }
+    }
+
+    function loadConfigScript(src, onLoad, onError) {
+      var s = document.createElement('script');
+      s.src = src;
+      s.onload = onLoad;
+      s.onerror = onError || function () {
+        console.error('Failed to load ' + src);
+        loadMapsThenFlutter();
+      };
+      document.head.appendChild(s);
     }
 
     var isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
     if (isLocal) {
-      var localCfg = document.createElement('script');
-      localCfg.src = '/config.local.js';
-      localCfg.onload = loadMapsWithKey;
-      localCfg.onerror = loadMapsWithKey;
-      document.head.appendChild(localCfg);
+      loadConfigScript('/config.local.js', loadMapsThenFlutter, loadMapsThenFlutter);
     } else {
-      var cfg = document.createElement('script');
-      cfg.src = '/api/carboncheck-config';
-      cfg.onload = loadMapsWithKey;
-      cfg.onerror = function () { console.error('Failed to load /api/carboncheck-config'); };
-      document.head.appendChild(cfg);
+      loadConfigScript('/api/carboncheck-config', loadMapsThenFlutter);
     }
   </script>
 </head>
 <body>
-  <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
