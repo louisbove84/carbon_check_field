@@ -1,5 +1,6 @@
 {
   "version": 2,
+  "ignoreCommand": "[ -d build/web ] && exit 0 || exit 1",
   "builds": [
     {
       "src": "api/**/*.js",

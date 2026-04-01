@@ -5,12 +5,16 @@ on:
     branches:
       - main
 
+# Use Node 24 for JS-based actions (checkout, etc.); see GitHub Actions changelog.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Flutter
         uses: subosito/flutter-action@v2
@@ -20,18 +24,23 @@ jobs:
 
       - name: Build Flutter web
         run: |
+          set -euxo pipefail
+          flutter --version
           flutter pub get
-          flutter build web --release
+          # CI: avoid wasm dry-run noise / possible non-zero exits on newer Flutter
+          flutter build web --release --no-wasm-dry-run
+          test -d build/web
+          test -f build/web/index.html
 
-      - name: Use Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: "24"
 
       - name: Install Vercel CLI
         run: npm install -g vercel@latest
 
-      - name: Link Vercel Project
+      - name: Link Vercel project
         run: |
           mkdir -p .vercel
           cat > .vercel/project.json << EOF
