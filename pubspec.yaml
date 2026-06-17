@@ -60,4 +60,5 @@ flutter:
   # Assets folder for .env file
   assets:
     - .env
+    - assets/precomputed_foxvalley.json
 

@@ -10,6 +10,7 @@ import 'package:carbon_check_field/models/field_data.dart';
 import 'package:carbon_check_field/models/prediction_result.dart';
 import 'package:carbon_check_field/services/backend_service.dart';
 import 'package:carbon_check_field/services/firebase_service.dart';
+import 'package:carbon_check_field/services/offline_lookup_service.dart';
 import 'package:carbon_check_field/widgets/loading_overlay.dart';
 import 'package:carbon_check_field/widgets/result_card.dart';
 import 'package:carbon_check_field/screens/crop_zones_map_screen.dart';
@@ -49,10 +50,28 @@ class _ResultsScreenState extends State<ResultsScreen> {
     _runAnalysis();
   }
 
-  /// Run the full analysis pipeline via secure backend
+  /// Run the analysis pipeline.
+  ///
+  /// Tries the on-device precomputed lookup first (instant, offline, no cost).
+  /// Falls back to the secure backend only if the field isn't in covered area.
   Future<void> _runAnalysis() async {
     try {
-      // Step 1: Ensure Firebase is initialized
+      // Step 1: Instant on-device lookup for covered (precomputed) areas
+      setState(() {
+        _loadingMessage = 'Checking instant-results area...';
+      });
+
+      final offlineResult =
+          await OfflineLookupService.analyze(widget.fieldData);
+      if (offlineResult != null) {
+        setState(() {
+          _isLoading = false;
+          _result = offlineResult;
+        });
+        return;
+      }
+
+      // Step 2: Outside coverage — use the secure backend (requires network)
       setState(() {
         _loadingMessage = 'Connecting securely...';
       });
@@ -61,14 +80,14 @@ class _ResultsScreenState extends State<ResultsScreen> {
         await FirebaseService.signInAnonymously();
       }
       
-      // Step 2: Send field to backend for analysis
+      // Step 3: Send field to backend for analysis
       setState(() {
         _loadingMessage = 'Analyzing satellite imagery (2024)...\nThis may take 10-30 seconds.';
       });
       
       final result = await _backendService.analyzeField(widget.fieldData);
       
-      // Step 3: Display results
+      // Step 4: Display results
       setState(() {
         _isLoading = false;
         _result = result;
