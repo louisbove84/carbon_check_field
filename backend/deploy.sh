@@ -46,7 +46,9 @@ gcloud services enable \
 echo "📦 Copying shared modules..."
 cp ../ml_pipeline/shared/feature_engineering.py .
 cp ../ml_pipeline/shared/earth_engine_features.py .
-echo "   ✅ Copied feature_engineering.py and earth_engine_features.py"
+cp ../ml_pipeline/shared/precomputed_lookup.py .
+cp ../ml_pipeline/shared/wisconsin_grid.py .
+echo "   ✅ Copied shared modules for Docker build"
 
 # Build Docker image
 echo "🏗️  Building Docker image..."
@@ -56,7 +58,7 @@ gcloud builds submit \
     .
 
 # Clean up copied files (they live in ml_pipeline/shared/)
-rm -f feature_engineering.py earth_engine_features.py
+rm -f feature_engineering.py earth_engine_features.py precomputed_lookup.py wisconsin_grid.py
 echo "   🧹 Cleaned up temporary copies"
 
 # Deploy to Cloud Run
@@ -70,7 +72,7 @@ gcloud run deploy ${SERVICE_NAME} \
     --cpu 1 \
     --timeout 300 \
     --max-instances 10 \
-    --set-env-vars "GCP_PROJECT=${PROJECT_ID}" \
+    --set-env-vars "GCP_PROJECT=${PROJECT_ID},PRECOMPUTE_ENABLED=true,PRECOMPUTE_YEARS=2024,GCP_PROJECT_ID=${PROJECT_ID}" \
     --service-account "carbon-check-field@${PROJECT_ID}.iam.gserviceaccount.com"
 
 # Get the service URL

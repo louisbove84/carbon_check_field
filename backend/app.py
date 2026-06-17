@@ -84,6 +84,23 @@ else:
     compute_ndvi_features_sync = None
     compute_ndvi_debug_info = None
 
+# Wisconsin precomputed grid lookup (BigQuery)
+_precompute_path = _first_existing(_shared_paths)
+if _precompute_path:
+    sys.path.insert(0, _precompute_path)
+    try:
+        from precomputed_lookup import lookup_intersecting_cells, is_precompute_enabled
+        print(" Wisconsin precomputed lookup module loaded")
+    except ImportError as e:
+        print(f"  Could not import precomputed_lookup: {e}")
+        lookup_intersecting_cells = None
+        is_precompute_enabled = lambda: False  # noqa: E731
+else:
+    lookup_intersecting_cells = None
+    is_precompute_enabled = lambda: False  # noqa: E731
+
+PRECOMPUTE_CELL_SIZE_M = int(os.getenv("PRECOMPUTE_CELL_SIZE_M", "250"))
+
 # Initialize FastAPI
 app = FastAPI(
     title="CarbonCheck Field API",
@@ -1135,6 +1152,13 @@ async def analyze_field(
                        f"Maximum size is {MAX_FIELD_SIZE_ACRES} acres (about 3 square miles). "
                        f"Please draw a smaller area or split into multiple fields."
             )
+
+        # Instant path: precomputed Wisconsin grid (BigQuery lookup)
+        if lookup_intersecting_cells and is_precompute_enabled():
+            precomputed = await analyze_field_precomputed(coords, area_acres, year)
+            if precomputed is not None:
+                print(f"[{request_id}] analyze complete mode=precomputed")
+                return precomputed
         
         # Choose analysis method based on field size
         if area_acres < MIN_FIELD_SIZE_FOR_GRID:
@@ -1155,6 +1179,138 @@ async def analyze_field(
         print(f"[{request_id}] Error in analyze_field: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def analyze_field_precomputed(
+    coords: List[Tuple[float, float]],
+    area_acres: float,
+    year: int,
+) -> Optional[AnalyzeFieldResponse]:
+    """
+    Lookup precomputed 250m grid cells from BigQuery (Wisconsin only).
+    Returns None if no coverage → caller falls back to live Earth Engine.
+    """
+    try:
+        cells = lookup_intersecting_cells(coords, year)
+        if not cells:
+            return None
+
+        request_id = request_id_ctx.get()
+        print(f"[{request_id}] Precomputed lookup: {len(cells)} cells")
+
+        cell_results = []
+        for cell in cells:
+            crop = cell["crop"]
+            if crop == "Other":
+                continue
+            try:
+                validate_crop_prediction(crop)
+            except HTTPException:
+                continue
+            cell_results.append(
+                {
+                    "crop": crop,
+                    "confidence": cell["confidence"],
+                    "polygon": cell["polygon"],
+                }
+            )
+
+        if not cell_results:
+            return None
+
+        unique_crops = {c["crop"] for c in cell_results}
+        use_grid = area_acres >= MIN_FIELD_SIZE_FOR_GRID or len(unique_crops) > 1
+
+        if not use_grid:
+            # Single dominant crop by overlap-weighted vote
+            crop_weights: Dict[str, float] = {}
+            crop_conf: Dict[str, List[float]] = {}
+            for cell in cells:
+                c = cell["crop"]
+                if c == "Other":
+                    continue
+                w = cell.get("overlap_m2", 1.0)
+                crop_weights[c] = crop_weights.get(c, 0.0) + w
+                crop_conf.setdefault(c, []).append(cell["confidence"] or 0.0)
+            crop = max(crop_weights.keys(), key=lambda k: crop_weights[k])
+            confidence = sum(crop_conf[crop]) / len(crop_conf[crop])
+            validate_crop_prediction(crop)
+            cdl_crop = get_cdl_crop_type(coords, year)
+            cdl_agreement = False
+            if cdl_crop:
+                cdl_agreement = crop.lower().replace(" ", "") == cdl_crop.lower().replace(" ", "")
+            income = calculate_carbon_income(crop, area_acres)
+            return AnalyzeFieldResponse(
+                crop=crop,
+                confidence=confidence,
+                cdl_crop=cdl_crop,
+                cdl_agreement=cdl_agreement,
+                area_acres=round(area_acres, 2),
+                co2_income_min=round(income["min"], 2),
+                co2_income_max=round(income["max"], 2),
+                co2_income_avg=round(income["avg"], 2),
+                features=None,
+                timestamp=datetime.utcnow().isoformat(),
+                best_model="precomputed",
+            )
+
+        zones = group_adjacent_cells(cell_results)
+        total_area = sum(z["area_acres"] for z in zones)
+        for zone in zones:
+            zone["percentage"] = (zone["area_acres"] / total_area) * 100 if total_area > 0 else 0
+
+        co2_by_crop = []
+        total_co2_min = total_co2_max = total_co2_avg = 0.0
+        for zone in zones:
+            income = calculate_carbon_income(zone["crop"], zone["area_acres"])
+            co2_by_crop.append(
+                CO2IncomeByCrop(
+                    crop=zone["crop"],
+                    min=round(income["min"], 2),
+                    max=round(income["max"], 2),
+                    avg=round(income["avg"], 2),
+                )
+            )
+            total_co2_min += income["min"]
+            total_co2_max += income["max"]
+            total_co2_avg += income["avg"]
+
+        dominant = max(zones, key=lambda z: z["area_acres"])
+        return AnalyzeFieldResponse(
+            crop=dominant["crop"],
+            confidence=dominant["confidence"],
+            area_acres=round(total_area, 2),
+            co2_income_min=round(total_co2_min, 2),
+            co2_income_max=round(total_co2_max, 2),
+            co2_income_avg=round(total_co2_avg, 2),
+            timestamp=datetime.utcnow().isoformat(),
+            best_model="precomputed",
+            field_summary=FieldSummary(
+                total_area_acres=round(total_area, 2),
+                grid_cell_size_meters=PRECOMPUTE_CELL_SIZE_M,
+                total_cells=len(cell_results),
+            ),
+            crop_zones=[
+                CropZone(
+                    crop=z["crop"],
+                    confidence=round(z["confidence"], 3) if z["confidence"] is not None else None,
+                    area_acres=round(z["area_acres"], 2),
+                    percentage=round(z["percentage"], 1),
+                    polygon=z["polygon"],
+                )
+                for z in zones
+            ],
+            co2_income=CO2IncomeTotal(
+                total_min=round(total_co2_min, 2),
+                total_max=round(total_co2_max, 2),
+                total_avg=round(total_co2_avg, 2),
+                by_crop=co2_by_crop,
+            ),
+        )
+    except Exception as e:
+        print(f"Precomputed analysis failed, falling back to live EE: {e}")
+        traceback.print_exc()
+        return None
 
 
 async def analyze_field_single(coords: List[Tuple[float, float]], area_acres: float, year: int) -> AnalyzeFieldResponse:

@@ -27,6 +27,18 @@ bigquery:
     holdout: holdout_test_set
     metrics: model_performance
     deployment: deployment_history
+    wi_crop_grid: wi_crop_grid  # Precomputed Wisconsin 250m crop predictions
+
+# ============================================================
+# WISCONSIN PRECOMPUTED GRID
+# ============================================================
+wisconsin_precompute:
+  enabled: true
+  cell_size_m: 250
+  years: [2024]
+  regions:
+    pilot: dane
+    full: wisconsin
 
 # ============================================================
 # TENSORBOARD

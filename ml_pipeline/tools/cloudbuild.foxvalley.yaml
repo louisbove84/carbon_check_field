@@ -1,0 +1,26 @@
+# Fox Valley farmland demo precompute (~11x11 km block near Wrightstown, WI, ~1.9k cells at 250m)
+# Run from repo root:
+#   gcloud builds submit --config=ml_pipeline/tools/cloudbuild.foxvalley.yaml . --project=ml-pipeline-477612
+steps:
+  - name: python:3.11-slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        apt-get update -qq && apt-get install -y -qq libgeos-dev libproj-dev g++ >/dev/null
+        pip install -q \
+          earthengine-api google-cloud-bigquery google-cloud-storage \
+          joblib 'scikit-learn==1.3.2' numpy pyproj shapely pandas
+        export PYTHONPATH=/workspace/ml_pipeline/shared
+        python /workspace/ml_pipeline/tools/precompute_wisconsin.py \
+          --region foxvalley \
+          --year 2024 \
+          --batch-size 250 \
+          --upload-bq
+    timeout: 7200s
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+serviceAccount: projects/ml-pipeline-477612/serviceAccounts/ml-pipeline-sa@ml-pipeline-477612.iam.gserviceaccount.com
+timeout: 7200s

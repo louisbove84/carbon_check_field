@@ -68,10 +68,11 @@ class AppConstants {
   /// App accent color (sky blue)
   static const int accentColorValue = 0xFF1976D2;
   
-  /// Default map camera position
-  static const double defaultLatitude = 44.409438290384166;
-  static const double defaultLongitude = -88.4304410977501;
-  static const double defaultZoom = 15.0;
+  /// Default map camera position (center of the precomputed "instant results"
+  /// coverage block — Fox Valley farmland near Wrightstown, WI)
+  static const double defaultLatitude = 44.4095;
+  static const double defaultLongitude = -88.4305;
+  static const double defaultZoom = 12.5;
   
   /// Minimum polygon points required
   static const int minPolygonPoints = 3;

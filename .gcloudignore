@@ -1,0 +1,14 @@
+.git
+.gitignore
+**/__pycache__
+**/*.pyc
+.venv
+build/
+lib/
+.dart_tool/
+ios/
+android/
+web/
+*.apk
+*.ipa
+node_modules/

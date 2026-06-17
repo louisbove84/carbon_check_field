@@ -1,0 +1,26 @@
+# One-off Dane County pilot precompute (200 cells)
+# Run from repo root:
+#   gcloud builds submit --config=ml_pipeline/tools/cloudbuild.precompute.yaml . --project=ml-pipeline-477612
+steps:
+  - name: python:3.11-slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        apt-get update -qq && apt-get install -y -qq libgeos-dev libproj-dev g++ >/dev/null
+        pip install -q \
+          earthengine-api google-cloud-bigquery google-cloud-storage \
+          joblib 'scikit-learn==1.3.2' numpy pyproj shapely pandas
+        export PYTHONPATH=/workspace/ml_pipeline/shared
+        python /workspace/ml_pipeline/tools/precompute_wisconsin.py \
+          --region dane \
+          --year 2024 \
+          --max-cells 200 \
+          --batch-size 50 \
+          --upload-bq
+    timeout: 3600s
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+serviceAccount: projects/ml-pipeline-477612/serviceAccounts/ml-pipeline-sa@ml-pipeline-477612.iam.gserviceaccount.com

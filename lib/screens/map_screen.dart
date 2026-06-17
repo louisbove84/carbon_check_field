@@ -26,7 +26,26 @@ class MapScreen extends StatefulWidget {
 class _MapScreenState extends State<MapScreen> {
   GoogleMapController? _mapController;
   final TextEditingController _searchController = TextEditingController();
-  
+
+  // Precomputed "instant results" coverage area (Madison demo block).
+  // Fields drawn inside this box return instantly via the BigQuery lookup;
+  // anything outside falls back to slower live Earth Engine analysis.
+  static const LatLng _precomputeSW = LatLng(44.360, -88.500);
+  static const LatLng _precomputeNE = LatLng(44.459, -88.361);
+
+  Polygon get _coverageBox => Polygon(
+        polygonId: const PolygonId('precompute_foxvalley'),
+        points: const [
+          LatLng(44.360, -88.500),
+          LatLng(44.360, -88.361),
+          LatLng(44.459, -88.361),
+          LatLng(44.459, -88.500),
+        ],
+        strokeColor: Colors.amber,
+        strokeWidth: 2,
+        fillColor: Colors.amber.withOpacity(0.12),
+      );
+
   // User-drawn polygon points
   final List<LatLng> _polygonPoints = [];
   
@@ -58,6 +77,12 @@ class _MapScreenState extends State<MapScreen> {
         title: const Text('Draw Your Field'),
         backgroundColor: const Color(0xFF2E7D32),
         actions: [
+          // Jump to the instant-results coverage area
+          IconButton(
+            icon: const Icon(Icons.bolt),
+            onPressed: _goToCoverageArea,
+            tooltip: 'Go to instant-results area',
+          ),
           // Clear button
           if (_polygonPoints.isNotEmpty)
             IconButton(
@@ -81,7 +106,7 @@ class _MapScreenState extends State<MapScreen> {
             mapType: MapType.satellite, // Satellite view for farm fields
             onMapCreated: _onMapCreated,
             onTap: _onMapTapped,
-            polygons: _polygons,
+            polygons: {_coverageBox, ..._polygons},
             markers: _markers,
             myLocationEnabled: true,
             myLocationButtonEnabled: true,
@@ -103,6 +128,40 @@ class _MapScreenState extends State<MapScreen> {
             left: 16,
             right: 16,
             child: MapInstructions(),
+          ),
+
+          // Legend for the precompute coverage box
+          Positioned(
+            top: 148,
+            left: 16,
+            child: Card(
+              elevation: 6,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10.0, vertical: 6.0),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 14,
+                      height: 14,
+                      decoration: BoxDecoration(
+                        color: Colors.amber.withOpacity(0.3),
+                        border: Border.all(color: Colors.amber, width: 2),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Instant results area',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
           
           // Bottom bar with area info and analyze button (always visible)
@@ -185,6 +244,16 @@ class _MapScreenState extends State<MapScreen> {
   /// Called when map is created
   void _onMapCreated(GoogleMapController controller) {
     _mapController = controller;
+  }
+
+  /// Animate the camera to fit the instant-results coverage box
+  void _goToCoverageArea() {
+    _mapController?.animateCamera(
+      CameraUpdate.newLatLngBounds(
+        LatLngBounds(southwest: _precomputeSW, northeast: _precomputeNE),
+        48,
+      ),
+    );
   }
 
   /// Handle map tap - add polygon vertex

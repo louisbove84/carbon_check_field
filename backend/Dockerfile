@@ -22,6 +22,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py .
 COPY feature_engineering.py .
 COPY earth_engine_features.py .
+COPY precomputed_lookup.py .
+COPY wisconsin_grid.py .
 
 # Set environment variables
 ENV PORT=8080
